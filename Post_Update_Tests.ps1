@@ -321,74 +321,89 @@ function AutoPostPatchdayTest()
   ##########################
   #Installierte Versionen pruefen
   ##########################
-  $Scriptblock = {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    #Von der DATEV Website das letzte Servicerelease holen
-    $response = Invoke-RestMethod 'https://apps.datev.de/myupdates-be/api/v1/deliveries/info' -Method 'GET'
-    $deliveries = $response.delivery_descriptions | Where-Object { $_ -ne $null}
+$Scriptblock = {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-    $lastReleaseId = ($deliveries | Where-Object { [datetime]([datetime]$_.delivery_date).ToString("yyyy-MM-dd") -lt [DateTime](Get-Date) -and ($_.delivery_type -eq "service_release" -or $_.delivery_type -eq "main_release")} | Sort-Object delivery_date -Descending | Select-Object -First 1).id
+  $response = Invoke-RestMethod 'https://apps.datev.de/myupdates-be/api/v1/deliveries/info' -Method 'GET'
+  $deliveries = $response.delivery_descriptions | Where-Object { $_ -ne $null }
 
-    #Aus dem letzten Servicerelease alle Produkte holen und UTF8 codieren (sonst werden Umlaute nicht dargestellt)
-    $res = Invoke-WebRequest "https://apps.datev.de/myupdates-be/api/v1/deliveries/$lastReleaseId"
-    $products = $res.Content | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($_)) } | ConvertFrom-Json
+  $latestReleases = (
+    $deliveries |
+    Where-Object {
+      $deliveryDate = [datetime]$_.delivery_date
+      $isReleaseType = $_.delivery_type -in @("service_release", "main_release")
+      ($deliveryDate -lt (Get-Date)) -and $isReleaseType
+    } |
+    Sort-Object @{Expression = {[datetime]$_.delivery_date}; Descending = $true }, `
+                @{Expression = {$_.id}; Descending = $true }
+  )
 
-    #Alle Produkte verarbeiten (Aus dem Titel den Namen und die Version extrahieren und in eine Hashtable schreiben
-    $ReleasedProducts = @{}
-    $products.products | ForEach-Object { try{$ReleasedProducts.Add($_.title.Substring(0, $_.title.lastIndexOf(' ')), $_.title.Split(" ")[-1])}catch{} } 
-    if ($ReleasedProducts.Count -eq 0)
-    {
-      write-Host "[-] $($env:computername) Aktuelle Releases konnten nicht zum Softwarevergleich von der DATEV Website heruntergeladen werden. Bitte manuell pruefen." -ForegroundColor red
-    } else
-    {
-      #Alle produkte aus der Registry laden und mir dem aktuellen release vergleichen
-      $BasePath = "HKLM:\SOFTWARE\WOW6432Node\DATEVeG\Components"
-      If ( Test-Path $BasePath )
-      {
-        $SoftwareBase = (Get-ChildItem $BasePath).Name
-        Foreach ( $component in $SoftwareBase )
-        {
+  $firstDate = [datetime]$latestReleases[0].delivery_date
+  $sameDayReleases = $latestReleases | Where-Object {
+    [datetime]$_.delivery_date -eq $firstDate
+  }
+  
+  $ReleasedProducts = @{}
+  foreach ($release in $sameDayReleases) {
+    $res = Invoke-WebRequest "https://apps.datev.de/myupdates-be/api/v1/deliveries/$($release.id)"
+    $products = $res.Content |
+      ForEach-Object {
+        [System.Text.Encoding]::UTF8.GetString([
+          System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($_))
+      } |
+      ConvertFrom-Json
 
-          try
-          {
-            $product = Get-ChildItem ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions") -ErrorAction Stop
-            $Name = (Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -Name "ProductInfoName" -ErrorAction Stop).ProductInfoName
-            $Version = ((Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -Name "ProductInfoVersion" -ErrorAction Stop).ProductInfoVersion).Replace("V.", "")
-                
-            if($ReleasedProducts.ContainsKey($Name))
-            {
-              #write-host "Installiertes Produkt in Release enthalten: $Name $Version"
-              if($Version -eq $ReleasedProducts[$Name])
-              {
-                #write-Host "[+] $($env:computername) $Name $Version geprueft: Aktuellste Version ist installiert"  -ForegroundColor green
-              } else
-              {
-
-                try
-                {if([System.Version]$Version -ge $ReleasedProducts[$Name])
-                  {
-                    #Write-Host "[+] $($env:computername) $Name Installierte Version hoeher als bereitgestellte: $Version > $($ReleasedProducts[$Name])" -ForegroundColor green
-                  } else
-                  {
-
-                    Write-Host "[-] $($env:computername) $Name Installierte Version stimmt nicht mit Release ueberein: $Version  | $($ReleasedProducts[$Name]) -> aktuell" -ForegroundColor red
-                  }
-                } catch
-                {write-host "[o] $($env:computername) $Name $Version Versionsvergleich nicht moeglich. Pilotversion installiert?"
-                }
-              }
-            }
-          } catch
-          {#Bei Fehlern nichts unternehmen
-          }
-        }
-        write-Host "[+] $($env:computername) DATEV Software wurde geprueft. Aktuelle Proukte wurden nicht aufgelistet."  -ForegroundColor green
-      } else
-      {Write-Host "[o] $($env:computername): DATEV Software kann nicht verglichen werden. Ist keine DATEV Software installiert?"
-      }
+    $products.products | ForEach-Object {
+      try {
+        $ReleasedProducts[$_.title.Substring(0, $_.title.lastIndexOf(' ')).Trim()] = $_.title.Split(" ")[-1]
+      } catch {}
     }
   }
-  invoke-swsubnet -scriptblock $Scriptblock
+
+  if ($ReleasedProducts.Count -eq 0) {
+    Write-Host "[-] $($env:computername) Aktuelle Releases konnten nicht zum Softwarevergleich von der DATEV Website heruntergeladen werden. Bitte manuell pruefen." -ForegroundColor Red
+  } else {
+    $BasePath = "HKLM:\SOFTWARE\WOW6432Node\DATEVeG\Components"
+    if (Test-Path $BasePath) {
+      $SoftwareBase = (Get-ChildItem $BasePath).Name
+      $errorcount = 0
+      foreach ($component in $SoftwareBase) {
+        try {
+          $product = Get-ChildItem ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions") -ErrorAction Stop
+          $Name = (Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -Name "ProductInfoName" -ErrorAction Stop).ProductInfoName.Trim()
+          $Version = ((Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -Name "ProductInfoVersion" -ErrorAction Stop).ProductInfoVersion).Replace("V.", "")
+
+          if ($ReleasedProducts.Keys -contains $Name) {
+            # Write-Host "Installiertes Produkt in Release enthalten: $Name $Version --->  $($ReleasedProducts[$Name])"
+            if ($Version -eq $ReleasedProducts[$Name]) {
+              # Aktuell
+            } else {
+              try {
+                if ([System.Version]$Version -ge [System.Version]$ReleasedProducts[$Name]) {
+                  # Neuere Version
+                } else {
+                  $errorcount++
+                  Write-Host "[-] $($env:computername) $Name Installierte Version stimmt nicht mit Release ueberein: $Version  | $($ReleasedProducts[$Name]) -> aktuell" -ForegroundColor Red
+                }
+              } catch {
+                Write-Host "[o] $($env:computername) $Name $Version Versionsvergleich nicht moeglich. Pilotversion installiert?"
+              }
+            }
+          }
+        } catch {
+          # Fehler ignorieren
+        }
+      }
+      if ($errorcount -eq 0) {
+        Write-Host "[+] $($env:computername) DATEV Software wurde geprueft. Aktuelle Produkte wurden nicht aufgelistet." -ForegroundColor Green
+      }
+    } else {
+      Write-Host "[o] $($env:computername): DATEV Software kann nicht verglichen werden. Ist keine DATEV Software installiert?"
+    }
+  }
+}
+
+  Invoke-SWSubnet -scriptblock $Scriptblock
   
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
