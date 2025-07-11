@@ -321,6 +321,7 @@ function AutoPostPatchdayTest()
   ##########################
   #Installierte Versionen pruefen
   ##########################
+  <#
 $Scriptblock = {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -404,6 +405,7 @@ $Scriptblock = {
 }
 
   Invoke-SWSubnet -scriptblock $Scriptblock
+  #>
   
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
