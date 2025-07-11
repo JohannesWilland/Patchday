@@ -321,10 +321,11 @@ function AutoPostPatchdayTest()
   ##########################
   #Installierte Versionen pruefen
   ##########################
+  <#
   $Scriptblock = {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     #Von der DATEV Website das letzte Servicerelease holen
-    $response = Invoke-RestMethod 'https://apps.datev.de/myupdates-be/api/v1/deliveries/info' -Method 'GET'
+    $response = Invoke-RestMethod 'https://apps.datev.de/myupdates-be/api/v1/deliveries/info' -Method 'GET' 
     $deliveries = $response.delivery_descriptions | Where-Object { $_ -ne $null}
 
     $lastReleaseId = ($deliveries | Where-Object { [datetime]([datetime]$_.delivery_date).ToString("yyyy-MM-dd") -lt [DateTime](Get-Date) -and ($_.delivery_type -eq "service_release" -or $_.delivery_type -eq "main_release")} | Sort-Object delivery_date -Descending | Select-Object -First 1).id
@@ -389,7 +390,7 @@ function AutoPostPatchdayTest()
     }
   }
   invoke-swsubnet -scriptblock $Scriptblock
-  
+  #>
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
   ##########################
