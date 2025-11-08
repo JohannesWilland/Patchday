@@ -321,46 +321,98 @@ function AutoPostPatchdayTest()
   ##########################
   #Installierte Versionen pruefen
   ##########################
-  <#
 $Scriptblock = {
+  $ErrorActionPreference = "Stop"
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-  $response = Invoke-RestMethod 'https://apps.datev.de/myupdates-be/api/v1/deliveries/info' -Method 'GET'
-  $deliveries = $response.delivery_descriptions | Where-Object { $_ -ne $null }
+  # -----------------------------------------------------------------------------
+  # TEIL 1: Authentifizierung & Session-Aufbau
+  # -----------------------------------------------------------------------------
+  $UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+  $SecChUa = '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"'
+  $Session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
-  $latestReleases = (
-    $deliveries |
-    Where-Object {
-      $deliveryDate = [datetime]$_.delivery_date
-      $isReleaseType = $_.delivery_type -in @("service_release", "main_release")
-      ($deliveryDate -lt (Get-Date)) -and $isReleaseType
-    } |
-    Sort-Object @{Expression = {[datetime]$_.delivery_date}; Descending = $true }, `
-                @{Expression = {$_.id}; Descending = $true }
-  )
+  try {
+    # 1. Initiale Cookies
+    Invoke-WebRequest -Uri "https://apps.datev.de/myupdates/delivery/all-items" -WebSession $Session -Headers @{
+        "Sec-Fetch-Dest"="document"; "Sec-Fetch-Mode"="navigate"; "Sec-Fetch-Site"="none"; "Upgrade-Insecure-Requests"="1"
+        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "sec-ch-ua-mobile"="?0"; "sec-ch-ua-platform"='"Windows"'
+    } -ErrorAction Stop | Out-Null
 
-  $firstDate = [datetime]$latestReleases[0].delivery_date
-  $sameDayReleases = $latestReleases | Where-Object {
-    [datetime]$_.delivery_date -eq $firstDate
-  }
-  
-  $ReleasedProducts = @{}
-  foreach ($release in $sameDayReleases) {
-    $res = Invoke-WebRequest "https://apps.datev.de/myupdates-be/api/v1/deliveries/$($release.id)"
-    $products = $res.Content |
-      ForEach-Object {
-        [System.Text.Encoding]::UTF8.GetString([
-          System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($_))
-      } |
-      ConvertFrom-Json
+    # 2. Session & XSRF-Token
+    $StatusUrl = "https://apps.datev.de/myupdates/api/login/status"
+    Invoke-WebRequest -Uri $StatusUrl -WebSession $Session -Headers @{
+        "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"; "X-Requested-With"="dcal"
+        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
+    } -ErrorAction Stop | Out-Null
 
-    $products.products | ForEach-Object {
-      try {
-        $ReleasedProducts[$_.title.Substring(0, $_.title.lastIndexOf(' ')).Trim()] = $_.title.Split(" ")[-1]
-      } catch {}
+    $XsrfToken = ($Session.Cookies.GetCookies($StatusUrl) | Where-Object { $_.Name -eq "XSRF-TOKEN" }).Value
+    if (-not $XsrfToken) { throw "XSRF-TOKEN konnte nicht ermittelt werden." }
+
+    # 3. Header für API-Abrufe vorbereiten
+    $HeadersApi = @{
+        "Accept"="application/json"; "Content-Type"="application/json"; "X-Requested-With"="dcal"; "X-XSRF-TOKEN"=$XsrfToken
+        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
+        "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"
     }
+
+    # -----------------------------------------------------------------------------
+    # TEIL 2: Datenabruf & Verarbeitung
+    # -----------------------------------------------------------------------------
+    $InfoUrl = 'https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/info'
+    $response = Invoke-RestMethod -Uri $InfoUrl -Method 'GET' -WebSession $Session -Headers $HeadersApi -ErrorAction Stop
+
+    $deliveries = $response.delivery_descriptions | Where-Object { $_ -ne $null }
+
+    $latestReleases = (
+      $deliveries |
+      Where-Object {
+        $deliveryDate = [datetime]$_.delivery_date
+        $isReleaseType = $_.delivery_type -in @("service_release", "main_release")
+        ($deliveryDate -lt (Get-Date)) -and $isReleaseType
+      } |
+      Sort-Object @{Expression = {[datetime]$_.delivery_date}; Descending = $true }, `
+                  @{Expression = {$_.id}; Descending = $true }
+    )
+
+    if ($latestReleases.Count -gt 0) {
+      $firstDate = [datetime]$latestReleases[0].delivery_date
+      $sameDayReleases = $latestReleases | Where-Object {
+        [datetime]$_.delivery_date -eq $firstDate
+      }
+      
+      $ReleasedProducts = @{}
+      foreach ($release in $sameDayReleases) {
+        $DetailUrl = "https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/$($release.id)"
+        try {
+            $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop
+            
+            $productsJson = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($res.Content))
+            $productsData = $productsJson | ConvertFrom-Json
+
+            $productsData.products | ForEach-Object {
+              try {
+                $lastSpaceIndex = $_.title.lastIndexOf(' ')
+                if ($lastSpaceIndex -gt 0) {
+                    $ReleasedProducts[$_.title.Substring(0, $lastSpaceIndex).Trim()] = $_.title.Substring($lastSpaceIndex + 1)
+                }
+              } catch {}
+            }
+        } catch {}
+      }
+    } else {
+        $ReleasedProducts = @{}
+    }
+
+  } catch {
+    # Falls Authentifizierung oder initialer Abruf fehlschlägt, leere Liste zurückgeben,
+    # damit unten die Fehlermeldung getriggert wird.
+    $ReleasedProducts = @{}
   }
 
+  # -----------------------------------------------------------------------------
+  # TEIL 3: Softwarevergleich (Lokale Registry)
+  # -----------------------------------------------------------------------------
   if ($ReleasedProducts.Count -eq 0) {
     Write-Host "[-] $($env:computername) Aktuelle Releases konnten nicht zum Softwarevergleich von der DATEV Website heruntergeladen werden. Bitte manuell pruefen." -ForegroundColor Red
   } else {
@@ -375,7 +427,6 @@ $Scriptblock = {
           $Version = ((Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -Name "ProductInfoVersion" -ErrorAction Stop).ProductInfoVersion).Replace("V.", "")
 
           if ($ReleasedProducts.Keys -contains $Name) {
-            # Write-Host "Installiertes Produkt in Release enthalten: $Name $Version --->  $($ReleasedProducts[$Name])"
             if ($Version -eq $ReleasedProducts[$Name]) {
               # Aktuell
             } else {
@@ -405,7 +456,6 @@ $Scriptblock = {
 }
 
   Invoke-SWSubnet -scriptblock $Scriptblock
-  #>
   
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
