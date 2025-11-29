@@ -319,7 +319,7 @@ function AutoPostPatchdayTest()
   }
 
   ##########################
-  #Installierte Versionen pruefen
+  #Installierte Versionen pruefen - OPTIMIZED (Decimal Logic & Multi-Language Safe)
   ##########################
 $Scriptblock = {
   $ErrorActionPreference = "Stop"
@@ -328,8 +328,8 @@ $Scriptblock = {
   # -----------------------------------------------------------------------------
   # TEIL 1: Authentifizierung & Session-Aufbau
   # -----------------------------------------------------------------------------
-  $UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
-  $SecChUa = '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"'
+  $UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+  $SecChUa = '"Chromium";v="121", "Google Chrome";v="121", "Not_A Brand";v="99"'
   $Session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
   try {
@@ -387,6 +387,7 @@ $Scriptblock = {
         try {
             $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop
             
+            # Encoding Fix für Umlaute
             $productsJson = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($res.Content))
             $productsData = $productsJson | ConvertFrom-Json
 
@@ -405,8 +406,6 @@ $Scriptblock = {
     }
 
   } catch {
-    # Falls Authentifizierung oder initialer Abruf fehlschlägt, leere Liste zurückgeben,
-    # damit unten die Fehlermeldung getriggert wird.
     $ReleasedProducts = @{}
   }
 
@@ -422,41 +421,63 @@ $Scriptblock = {
       $errorcount = 0
       foreach ($component in $SoftwareBase) {
         try {
-          $product = Get-ChildItem ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions") -ErrorAction Stop
-          $Name = (Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -Name "ProductInfoName" -ErrorAction Stop).ProductInfoName.Trim()
-          $Version = ((Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -Name "ProductInfoVersion" -ErrorAction Stop).ProductInfoVersion).Replace("V.", "")
-
+          $productKeyPath = ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions")
+          $product = Get-ChildItem $productKeyPath -ErrorAction Stop
+          
+          # Sicherer Abruf der Eigenschaften
+          $regProps = Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -ErrorAction Stop
+          $Name = $regProps.ProductInfoName.Trim()
+          
+          # Rohwert aus Registry (z.B. "V.16.3")
+          $RawLocalVersion = $regProps.ProductInfoVersion
+          
           if ($ReleasedProducts.Keys -contains $Name) {
-            if ($Version -eq $ReleasedProducts[$Name]) {
-              # Aktuell
-            } else {
-              try {
-                if ([System.Version]$Version -ge [System.Version]$ReleasedProducts[$Name]) {
-                  # Neuere Version
+            
+            # --- NEUE LOGIK START (DATEV NUMERISCH & MULTI-LANGUAGE SAFE) ---
+            
+            # 1. Kommas IMMER zu Punkt normalisieren
+            # 2. Alles entfernen, was keine Ziffer oder Punkt ist
+            # 3. TrimStart('.'): Entfernt den Punkt, der nach dem Löschen von "V" übrig bleibt (".16.3" -> "16.3")
+            $CleanLocalVerString = ($RawLocalVersion.ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+            $CleanRemoteVerString = ($ReleasedProducts[$Name].ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+
+            try {
+                # 3. Explizites Casting in [double] mit InvariantCulture
+                # InvariantCulture ignoriert die OS-Sprache und erzwingt den Punkt als Trenner.
+                $LocalVerVal = [double]::Parse($CleanLocalVerString, [System.Globalization.CultureInfo]::InvariantCulture)
+                $RemoteVerVal = [double]::Parse($CleanRemoteVerString, [System.Globalization.CultureInfo]::InvariantCulture)
+
+                # 4. Mathematischer Vergleich (16.3 > 16.21 ist hier WAHR)
+                if ($LocalVerVal -ge $RemoteVerVal) {
+                   # Installiert ist neuer oder gleich (OK)
                 } else {
-                  $errorcount++
-                  Write-Host "[-] $($env:computername) $Name Installierte Version stimmt nicht mit Release ueberein: $Version  | $($ReleasedProducts[$Name]) -> aktuell" -ForegroundColor Red
+                   # Remote ist mathematisch groesser
+                   $errorcount++
+                   Write-Host "[-] $($env:computername) $Name Installierte Version stimmt nicht mit Release ueberein: $LocalVerVal | $RemoteVerVal -> aktuell" -ForegroundColor Red
                 }
-              } catch {
-                Write-Host "[o] $($env:computername) $Name $Version Versionsvergleich nicht moeglich. Pilotversion installiert?"
-              }
+
+            } catch {
+                # Fallback, falls Casting fehlschlägt
+                Write-Host "[o] $($env:computername) $Name - Version konnte nicht numerisch verglichen werden (Lokal: '$RawLocalVersion' vs Remote: '$($ReleasedProducts[$Name])'). Pilotversion?" -ForegroundColor Yellow
             }
+            # --- NEUE LOGIK ENDE ---
+
           }
         } catch {
-          # Fehler ignorieren
+          # Fehler ignorieren (Key nicht gefunden etc.)
         }
       }
       if ($errorcount -eq 0) {
-        Write-Host "[+] $($env:computername) DATEV Software wurde geprueft. Aktuelle Produkte wurden nicht aufgelistet." -ForegroundColor Green
+        Write-Host "[+] $($env:computername) DATEV Software wurde geprueft. Keine veralteten Produkte gefunden." -ForegroundColor Green
       }
     } else {
-      Write-Host "[o] $($env:computername): DATEV Software kann nicht verglichen werden. Ist keine DATEV Software installiert?"
+      Write-Host "[o] $($env:computername): DATEV Software kann nicht verglichen werden. Pfad nicht gefunden."
     }
   }
 }
 
-  Invoke-SWSubnet -scriptblock $Scriptblock
-  
+Invoke-SWSubnet -scriptblock $Scriptblock
+
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
   ##########################
