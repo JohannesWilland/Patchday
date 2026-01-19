@@ -337,14 +337,14 @@ $Scriptblock = {
     Invoke-WebRequest -Uri "https://apps.datev.de/myupdates/delivery/all-items" -WebSession $Session -Headers @{
         "Sec-Fetch-Dest"="document"; "Sec-Fetch-Mode"="navigate"; "Sec-Fetch-Site"="none"; "Upgrade-Insecure-Requests"="1"
         "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "sec-ch-ua-mobile"="?0"; "sec-ch-ua-platform"='"Windows"'
-    } -ErrorAction Stop | Out-Null
+    } -ErrorAction Stop -UseBasicParsing | Out-Null
 
     # 2. Session & XSRF-Token
     $StatusUrl = "https://apps.datev.de/myupdates/api/login/status"
     Invoke-WebRequest -Uri $StatusUrl -WebSession $Session -Headers @{
         "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"; "X-Requested-With"="dcal"
         "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
-    } -ErrorAction Stop | Out-Null
+    } -ErrorAction Stop -UseBasicParsing | Out-Null
 
     $XsrfToken = ($Session.Cookies.GetCookies($StatusUrl) | Where-Object { $_.Name -eq "XSRF-TOKEN" }).Value
     if (-not $XsrfToken) { throw "XSRF-TOKEN konnte nicht ermittelt werden." }
@@ -385,7 +385,7 @@ $Scriptblock = {
       foreach ($release in $sameDayReleases) {
         $DetailUrl = "https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/$($release.id)"
         try {
-            $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop
+            $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop -UseBasicParsing
             
             # Encoding Fix für Umlaute
             $productsJson = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($res.Content))
