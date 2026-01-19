@@ -523,22 +523,69 @@ Invoke-SWSubnet -scriptblock $Scriptblock
   ##########################
   #Citrix Wartungsmodus pruefen 
   ##########################
-  $ctxComputerName = (Resolve-DNSName -Type SRV -Name ("swctxdc._tcp." + $ENV:USERDNSDOMAIN))[0].NameTarget
-  Write-Progress -Activity "Citrix Wartungsmodus wird abgerufen" -Status "Verbindung mit dem Citrix Controller wird aufgebaut" -PercentComplete 100; $ctxSession = New-PSSession -ComputerName $ctxComputerName -ConfigurationName CitrixConfig
-  Write-Progress -Activity "Post Patchday Tests neugestartet" -Status "Tests laufen" -PercentComplete 100
-  $ctxBroker = invoke-command -Session $ctxSession -ScriptBlock {Get-BrokerMachine}
-  $ctxBroker | ForEach-Object{if ($_.InMaintenanceMode)
-    {
-      write-host -ForegroundColor red "[-] $($_.MachineName) Wartungsmodus ist aktiv! Automatisierung noch aktiv?"
-      $TestSuccess = $false
-      $TestMessage = "Wartungsmodus aktiv!"
-    } else
-    {
-      write-host -ForegroundColor green "[+] $($_.MachineName) Wartungsmodus ist aus."
+ 
+$ErrorActionPreference = 'Stop'
+
+try {
+    # --- 1) Controller über SRV-Record finden ---
+    $dnsName = "swctxdc._tcp.$($env:USERDNSDOMAIN)"
+    $srv = Resolve-DnsName -Type SRV -Name $dnsName |
+           Sort-Object -Property Priority,Weight |
+           Select-Object -First 1
+
+    if (-not $srv) { throw "Kein SRV-Record für $dnsName gefunden." }
+
+    $ctxComputerName = $srv.NameTarget.TrimEnd('.')
+
+
+    # --- 2) SessionTimeOuts (lokal, NICHT remote!) ---
+    $so = New-PSSessionOption -OperationTimeout 180000 -IdleTimeout 600000
+
+
+    # --- 3) RemoteSession öffnen ---
+    $ctxSession = New-PSSession -ComputerName $ctxComputerName `
+                                -ConfigurationName CitrixConfig `
+                                -SessionOption $so
+
+
+    # --- 4) ABSOLUT minimaler Citrix Remote Call ---
+    #     Keine Syntax, keine Arrays, keine Variablen: nur 1 Cmdlet
+    $ctxBroker = Invoke-Command -Session $ctxSession -ScriptBlock {
+        Get-BrokerMachine
     }
+
+
+    # --- 5) Lokale Auswertung ---
+    $TestSuccess = $true
+    $TestMessage = "Wartungsmodus aus."
+
+    foreach ($m in $ctxBroker) {
+        if ($m.InMaintenanceMode) {
+            Write-Host -ForegroundColor Red "[-] $($m.MachineName) Wartungsmodus aktiv!"
+            $TestSuccess = $false
+            $TestMessage = "Mindestens ein System im Wartungsmodus."
+        }
+        else {
+            Write-Host -ForegroundColor Green "[+] $($m.MachineName) Wartungsmodus aus."
+        }
+    }
+}
+catch {
+    Write-Warning "Fehler: $($_.Exception.Message)"
+}
+finally {
+    # --- 6) Session bereinigen ---
+    if ($ctxSession) {
+        try { Remove-PSSession -Session $ctxSession }
+        catch { Write-Warning "Session konnte nicht entfernt werden: $($_.Exception.Message)" }
+    }
+}
+
+# Optionale Rückgabe
+return @{
+    Success = $TestSuccess
+    Message = $TestMessage
   }
-  $ctxSession | Disconnect-PSSession
-  Remove-PSSession -Session $ctxSession
 
   ##########################
   #Ergebnis an OT uebermitteln
