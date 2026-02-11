@@ -15,6 +15,18 @@ if (Test-Path "$env:DATEVPP\PROGRAMM\K0005000\Arbeitsplatz.exe")
   & "$env:DATEVPP\PROGRAMM\K0005000\Arbeitsplatz.exe"
 }
 
+#### Teams neu installieren:
+
+$TeamsScriptblock = {
+  if ((Get-Package -Name teams2 -ErrorAction SilentlyContinue) -ne $null) {
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -contains "ms-teams" } | ForEach-Object {$_.CloseMainWindow() | Out-Null }
+    Uninstall-Package -Name teams2 -AllVersions
+    Install-Package -Name teams2 -Source schuwa-repo
+  }
+}
+Invoke-SWSubnet -TSOnly -Scriptblock $TeamsScriptblock
+# Wieder entfernen nach dem Patchday, damit nicht bei jedem Start von Start-SWPatchdayPreparationsNG Teams neu installiert wird.
+
 function Send-PatchdayOTState($state)
 {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
