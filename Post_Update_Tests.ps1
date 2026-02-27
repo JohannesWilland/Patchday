@@ -22,6 +22,8 @@ $TeamsScriptblock = {
     Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -contains "ms-teams" } | ForEach-Object {$_.CloseMainWindow() | Out-Null }
     Uninstall-Package -Name teams2 -AllVersions
     Install-Package -Name teams2 -Source schuwa-repo
+    Write-Host "[+] $env:HOSTNAME Microsoft Teams wurde neu installiert." -ForegroundColor Green
+    Write-Host "    WICHTIG bitte einmal >>Invoke-SWSubnet -TSOnly -Scriptblock {shutdown /r /t 0 /f}<< am FILESERVER ausführen!!!!" -ForegroundColor Yellow
   }
 }
 Invoke-SWSubnet -TSOnly -Scriptblock $TeamsScriptblock
