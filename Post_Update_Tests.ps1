@@ -19,7 +19,7 @@ if (Test-Path "$env:DATEVPP\PROGRAMM\K0005000\Arbeitsplatz.exe")
 
 $TeamsScriptblock = {
   if ((Get-Package -Name teams2 -ErrorAction SilentlyContinue) -ne $null) {
-    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -contains "ms-teams" } | ForEach-Object {$_.CloseMainWindow() | Out-Null }
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -contains "ms-teams" } | Stop-Process -Force
     Uninstall-Package -Name teams2 -AllVersions
     Install-Package -Name teams2 -Source schuwa-repo
     Write-Host "[+] $env:COMPUTERNAME Microsoft Teams wurde neu installiert." -ForegroundColor Green
