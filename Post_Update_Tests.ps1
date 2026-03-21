@@ -585,7 +585,7 @@ function AutoPostPatchdayTest()
   ##########################
   #Ergebnis an OT uebermitteln
   ##########################
-  if ($TestSuccess)
+  if ($TestSuccess -eq $true)
   {
     Send-PatchdayOTState("8 - Tests abgeschlossen: erfolgreich")
   } else
