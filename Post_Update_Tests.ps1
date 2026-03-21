@@ -557,8 +557,6 @@ function AutoPostPatchdayTest()
 
 
       # --- 5) Lokale Auswertung ---
-      $TestMessage = "Wartungsmodus aus."
-
       foreach ($m in $ctxBroker) {
           if ($m.InMaintenanceMode) {
               Write-Host -ForegroundColor Red "[-] $($m.MachineName) Wartungsmodus aktiv!"
