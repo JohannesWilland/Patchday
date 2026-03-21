@@ -557,7 +557,6 @@ function AutoPostPatchdayTest()
 
 
       # --- 5) Lokale Auswertung ---
-      $TestSuccess = $true
       $TestMessage = "Wartungsmodus aus."
 
       foreach ($m in $ctxBroker) {
