@@ -319,165 +319,170 @@ function AutoPostPatchdayTest()
     $TestMessage = "Lima konnte nicht getestet werden"
   }
 
-  ##########################
-  #Installierte Versionen pruefen - OPTIMIZED (Decimal Logic & Multi-Language Safe)
-  ##########################
-  $Scriptblock = {
-    $ErrorActionPreference = "Stop"
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+##########################
+# Phase 1: Zentraler Datenabruf (Läuft lokal auf deinem Management-System)
+##########################
+Write-Host "[*] Starte zentralen Datenabruf bei DATEV (letzte 60 Tage)..." -ForegroundColor Cyan
 
-    # -----------------------------------------------------------------------------
-    # TEIL 1: Authentifizierung & Session-Aufbau
-    # -----------------------------------------------------------------------------
-    $UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-    $SecChUa = '"Chromium";v="121", "Google Chrome";v="121", "Not_A Brand";v="99"'
-    $Session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-    try {
-      # 1. Initiale Cookies
-      Invoke-WebRequest -Uri "https://apps.datev.de/myupdates/delivery/all-items" -WebSession $Session -Headers @{
-          "Sec-Fetch-Dest"="document"; "Sec-Fetch-Mode"="navigate"; "Sec-Fetch-Site"="none"; "Upgrade-Insecure-Requests"="1"
-          "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "sec-ch-ua-mobile"="?0"; "sec-ch-ua-platform"='"Windows"'
-      } -ErrorAction Stop -UseBasicParsing | Out-Null
+$UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+$SecChUa = '"Chromium";v="121", "Google Chrome";v="121", "Not_A Brand";v="99"'
+$Session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
-      # 2. Session & XSRF-Token
-      $StatusUrl = "https://apps.datev.de/myupdates/api/login/status"
-      Invoke-WebRequest -Uri $StatusUrl -WebSession $Session -Headers @{
-          "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"; "X-Requested-With"="dcal"
-          "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
-      } -ErrorAction Stop -UseBasicParsing | Out-Null
+$ReleasedProducts = @{}
 
-      $XsrfToken = ($Session.Cookies.GetCookies($StatusUrl) | Where-Object { $_.Name -eq "XSRF-TOKEN" }).Value
-      if (-not $XsrfToken) { throw "XSRF-TOKEN konnte nicht ermittelt werden." }
+try {
+    # 1. Initiale Cookies
+    Invoke-WebRequest -Uri "https://apps.datev.de/myupdates/delivery/all-items" -WebSession $Session -Headers @{
+        "Sec-Fetch-Dest"="document"; "Sec-Fetch-Mode"="navigate"; "Sec-Fetch-Site"="none"; "Upgrade-Insecure-Requests"="1"
+        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "sec-ch-ua-mobile"="?0"; "sec-ch-ua-platform"='"Windows"'
+    } -ErrorAction Stop -UseBasicParsing | Out-Null
 
-      # 3. Header für API-Abrufe vorbereiten
-      $HeadersApi = @{
-          "Accept"="application/json"; "Content-Type"="application/json"; "X-Requested-With"="dcal"; "X-XSRF-TOKEN"=$XsrfToken
-          "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
-          "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"
-      }
+    # 2. Session & XSRF-Token
+    $StatusUrl = "https://apps.datev.de/myupdates/api/login/status"
+    Invoke-WebRequest -Uri $StatusUrl -WebSession $Session -Headers @{
+        "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"; "X-Requested-With"="dcal"
+        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
+    } -ErrorAction Stop -UseBasicParsing | Out-Null
 
-      # -----------------------------------------------------------------------------
-      # TEIL 2: Datenabruf & Verarbeitung
-      # -----------------------------------------------------------------------------
-      $InfoUrl = 'https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/info'
-      $response = Invoke-RestMethod -Uri $InfoUrl -Method 'GET' -WebSession $Session -Headers $HeadersApi -ErrorAction Stop
+    $XsrfToken = ($Session.Cookies.GetCookies($StatusUrl) | Where-Object { $_.Name -eq "XSRF-TOKEN" }).Value
+    if (-not $XsrfToken) { throw "XSRF-TOKEN konnte nicht ermittelt werden." }
 
-      $deliveries = $response.delivery_descriptions | Where-Object { $_ -ne $null }
-
-      $latestReleases = (
-        $deliveries |
-        Where-Object {
-          $deliveryDate = [datetime]$_.delivery_date
-          $isReleaseType = $_.delivery_type -in @("service_release", "main_release")
-          ($deliveryDate -lt (Get-Date)) -and $isReleaseType
-        } |
-        Sort-Object @{Expression = {[datetime]$_.delivery_date}; Descending = $true }, `
-                    @{Expression = {$_.id}; Descending = $true }
-      )
-
-      if ($latestReleases.Count -gt 0) {
-        $firstDate = [datetime]$latestReleases[0].delivery_date
-        $sameDayReleases = $latestReleases | Where-Object {
-          [datetime]$_.delivery_date -eq $firstDate
-        }
-        
-        $ReleasedProducts = @{}
-        foreach ($release in $sameDayReleases) {
-          $DetailUrl = "https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/$($release.id)"
-          try {
-              $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop -UseBasicParsing
-              
-              # Encoding Fix für Umlaute
-              $productsJson = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($res.Content))
-              $productsData = $productsJson | ConvertFrom-Json
-
-              $productsData.products | ForEach-Object {
-                try {
-                  $lastSpaceIndex = $_.title.lastIndexOf(' ')
-                  if ($lastSpaceIndex -gt 0) {
-                      $ReleasedProducts[$_.title.Substring(0, $lastSpaceIndex).Trim()] = $_.title.Substring($lastSpaceIndex + 1)
-                  }
-                } catch {}
-              }
-          } catch {}
-        }
-      } else {
-          $ReleasedProducts = @{}
-      }
-
-    } catch {
-      $ReleasedProducts = @{}
+    # 3. Header für API-Abrufe
+    $HeadersApi = @{
+        "Accept"="application/json"; "Content-Type"="application/json"; "X-Requested-With"="dcal"; "X-XSRF-TOKEN"=$XsrfToken
+        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
+        "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"
     }
 
-    # -----------------------------------------------------------------------------
-    # TEIL 3: Softwarevergleich (Lokale Registry)
-    # -----------------------------------------------------------------------------
-    if ($ReleasedProducts.Count -eq 0) {
-      Write-Host "[-] $($env:computername) Aktuelle Releases konnten nicht zum Softwarevergleich von der DATEV Website heruntergeladen werden. Bitte manuell pruefen." -ForegroundColor Red
-    } else {
-      $BasePath = "HKLM:\SOFTWARE\WOW6432Node\DATEVeG\Components"
-      if (Test-Path $BasePath) {
+    # 4. Abruf der 60-Tage-Historie
+    $InfoUrl = 'https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/info'
+    $response = Invoke-RestMethod -Uri $InfoUrl -Method 'GET' -WebSession $Session -Headers $HeadersApi -ErrorAction Stop
+
+    $deliveries = $response.delivery_descriptions | Where-Object { $_ -ne $null }
+    $DateLimit = (Get-Date).AddDays(-60)
+
+    $relevantReleases = $deliveries | Where-Object {
+        $deliveryDate = [datetime]$_.delivery_date
+        $isReleaseType = $_.delivery_type -in @("service_release", "main_release")
+        ($deliveryDate -ge $DateLimit) -and ($deliveryDate -lt (Get-Date)) -and $isReleaseType
+    }
+
+    # 5. Aggregation der höchsten Versionen
+    foreach ($release in $relevantReleases) {
+        $DetailUrl = "https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/$($release.id)"
+        try {
+            $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop -UseBasicParsing
+            $productsJson = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($res.Content))
+            $productsData = $productsJson | ConvertFrom-Json
+
+            $productsData.products | ForEach-Object {
+                try {
+                    $lastSpaceIndex = $_.title.lastIndexOf(' ')
+                    if ($lastSpaceIndex -gt 0) {
+                        $ProductName = $_.title.Substring(0, $lastSpaceIndex).Trim()
+                        $ProductVersionRaw = $_.title.Substring($lastSpaceIndex + 1)
+                        
+                        $CleanNewVerStr = ($ProductVersionRaw.Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+                        $NewVerVal = [double]::Parse($CleanNewVerStr, [System.Globalization.CultureInfo]::InvariantCulture)
+
+                        if ($ReleasedProducts.ContainsKey($ProductName)) {
+                            $ExistingVerRaw = $ReleasedProducts[$ProductName]
+                            $CleanExistingVerStr = ($ExistingVerRaw.Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+                            $ExistingVerVal = [double]::Parse($CleanExistingVerStr, [System.Globalization.CultureInfo]::InvariantCulture)
+
+                            if ($NewVerVal -gt $ExistingVerVal) {
+                                $ReleasedProducts[$ProductName] = $ProductVersionRaw
+                            }
+                        } else {
+                            $ReleasedProducts[$ProductName] = $ProductVersionRaw
+                        }
+                    }
+                } catch {}
+            }
+        } catch {}
+    }
+    Write-Host "[+] Datenabruf erfolgreich. $($ReleasedProducts.Count) DATEV-Produkte für den Abgleich aggregiert." -ForegroundColor Green
+
+} catch {
+    Write-Host "[-] Fehler beim zentralen Datenabruf: $($_.Exception.Message)" -ForegroundColor Red
+    exit # Bricht das Master-Skript ab, bevor 2000 Server fehlerhaft geprüft werden
+}
+
+
+##########################
+# Phase 2: Remote ScriptBlock (Wird auf den 2000 Servern ausgeführt)
+##########################
+
+$Scriptblock = {
+    $ErrorActionPreference = "Stop"
+
+    # Wir greifen mit dem $using: Scope auf die lokale Variable des Master-Skripts zu
+    # und speichern sie für die lokale Verarbeitung im Scriptblock ab.
+    $RemoteData = $using:ReleasedProducts
+
+    # Sicherheitsprüfung, falls die Datenübergabe fehlgeschlagen ist
+    if (-not $RemoteData -or $RemoteData.Count -eq 0) {
+        Write-Host "[-] $($env:computername) Es wurden keine Referenzdaten übergeben. Prüfung abgebrochen." -ForegroundColor Red
+        return
+    }
+
+    $BasePath = "HKLM:\SOFTWARE\WOW6432Node\DATEVeG\Components"
+    if (Test-Path $BasePath) {
         $SoftwareBase = (Get-ChildItem $BasePath).Name
         $errorcount = 0
+        
         foreach ($component in $SoftwareBase) {
-          try {
-            $productKeyPath = ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions")
-            $product = Get-ChildItem $productKeyPath -ErrorAction Stop
-            
-            # Sicherer Abruf der Eigenschaften
-            $regProps = Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -ErrorAction Stop
-            $Name = $regProps.ProductInfoName.Trim()
-            
-            # Rohwert aus Registry (z.B. "V.16.3")
-            $RawLocalVersion = $regProps.ProductInfoVersion
-            
-            if ($ReleasedProducts.Keys -contains $Name) {
-              
-              # --- NEUE LOGIK START (DATEV NUMERISCH & MULTI-LANGUAGE SAFE) ---
-              
-              # 1. Kommas IMMER zu Punkt normalisieren
-              # 2. Alles entfernen, was keine Ziffer oder Punkt ist
-              # 3. TrimStart('.'): Entfernt den Punkt, der nach dem Löschen von "V" übrig bleibt (".16.3" -> "16.3")
-              $CleanLocalVerString = ($RawLocalVersion.ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
-              $CleanRemoteVerString = ($ReleasedProducts[$Name].ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+            try {
+                $productKeyPath = ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions")
+                $product = Get-ChildItem $productKeyPath -ErrorAction Stop
+                
+                $regProps = Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -ErrorAction Stop
+                $Name = $regProps.ProductInfoName.Trim()
+                $RawLocalVersion = $regProps.ProductInfoVersion
+                
+                # Wir rufen den Remote-Sollwert direkt ab. 
+                # Ist das Produkt nicht in der Liste, ist der Wert $null.
+                $RemoteVersionRaw = $RemoteData[$Name]
+                
+                if ($null -ne $RemoteVersionRaw) {
+                    
+                    $CleanLocalVerString = ($RawLocalVersion.ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+                    $CleanRemoteVerString = ($RemoteVersionRaw.ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
 
-              try {
-                  # 3. Explizites Casting in [double] mit InvariantCulture
-                  # InvariantCulture ignoriert die OS-Sprache und erzwingt den Punkt als Trenner.
-                  $LocalVerVal = [double]::Parse($CleanLocalVerString, [System.Globalization.CultureInfo]::InvariantCulture)
-                  $RemoteVerVal = [double]::Parse($CleanRemoteVerString, [System.Globalization.CultureInfo]::InvariantCulture)
+                    try {
+                        $LocalVerVal = [double]::Parse($CleanLocalVerString, [System.Globalization.CultureInfo]::InvariantCulture)
+                        $RemoteVerVal = [double]::Parse($CleanRemoteVerString, [System.Globalization.CultureInfo]::InvariantCulture)
 
-                  # 4. Mathematischer Vergleich (16.3 > 16.21 ist hier WAHR)
-                  if ($LocalVerVal -ge $RemoteVerVal) {
-                    # Installiert ist neuer oder gleich (OK)
-                  } else {
-                    # Remote ist mathematisch groesser
-                    $errorcount++
-                    Write-Host "[-] $($env:computername) $Name Installierte Version stimmt nicht mit Release ueberein: $LocalVerVal | $RemoteVerVal -> aktuell" -ForegroundColor Red
-                  }
-
-              } catch {
-                  # Fallback, falls Casting fehlschlägt
-                  Write-Host "[o] $($env:computername) $Name - Version konnte nicht numerisch verglichen werden (Lokal: '$RawLocalVersion' vs Remote: '$($ReleasedProducts[$Name])'). Pilotversion?" -ForegroundColor Yellow
-              }
-              # --- NEUE LOGIK ENDE ---
-
+                        if ($LocalVerVal -lt $RemoteVerVal) {
+                            $errorcount++
+                            Write-Host "[-] $($env:computername) $($Name): Installiert -> $LocalVerVal | Remote/Soll -> $RemoteVerVal" -ForegroundColor Red
+                        }
+                    } catch {
+                        Write-Host "[o] $($env:computername) $($Name): - Pilotversion? (Lokal: '$RawLocalVersion' vs Remote: '$RemoteVersionRaw')" -ForegroundColor Yellow
+                    }
+                }
+            } catch {
+                # Fehler beim Auslesen einzelner Keys ignorieren
             }
-          } catch {
-            # Fehler ignorieren (Key nicht gefunden etc.)
-          }
         }
+        
         if ($errorcount -eq 0) {
-          Write-Host "[+] $($env:computername) DATEV Software wurde geprueft. Keine veralteten Produkte gefunden." -ForegroundColor Green
+            Write-Host "[+] $($env:computername) DATEV Software geprüft. Alles aktuell." -ForegroundColor Green
         }
-      } else {
-        Write-Host "[o] $($env:computername): DATEV Software kann nicht verglichen werden. Pfad nicht gefunden."
-      }
+    } else {
+        Write-Host "[o] $($env:computername): DATEV Registry-Pfad nicht gefunden."
     }
-  }
+}
 
-  Invoke-SWSubnet -scriptblock $Scriptblock
+##########################
+# Phase 3: Ausführung auf den Zielsystemen
+##########################
+
+# Einfacher Aufruf des Wrappers ohne ArgumentList
+Invoke-SWSubnet -scriptblock $Scriptblock
 
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
