@@ -408,22 +408,32 @@ try {
 
 } catch {
     Write-Host "[-] Fehler beim zentralen Datenabruf: $($_.Exception.Message)" -ForegroundColor Red
-    exit # Bricht das Master-Skript ab, bevor 2000 Server fehlerhaft geprüft werden
+    exit
 }
-
 
 ##########################
 # Phase 2: Remote ScriptBlock (Wird auf den 2000 Servern ausgeführt)
 ##########################
 
-$Scriptblock = {
+# Da der $using: Scope Modul-Grenzen (SWStandardTools) nicht überlebt,
+# konvertieren wir die Hashtable in einen String-Ausdruck (z.B. @{'App1'='1.0'; 'App2'='2.0'})
+$HashStringEntries = @()
+foreach ($key in $ReleasedProducts.Keys) {
+    # Einfache Anführungszeichen escapen, falls Produktnamen welche enthalten
+    $safeKey = $key -replace "'", "''" 
+    $safeVal = $ReleasedProducts[$key] -replace "'", "''"
+    $HashStringEntries += "'$safeKey'='$safeVal'"
+}
+$HashStringDefinition = "@{" + ($HashStringEntries -join '; ') + "}"
+
+# Wir nutzen einen Single-Quote Here-String (@' ... '@), damit PowerShell lokale 
+# Variablen ($env:computername etc.) beim Einlesen nicht direkt auflöst.
+$ScriptBlockTemplate = @'
     $ErrorActionPreference = "Stop"
 
-    # Wir greifen mit dem $using: Scope auf die lokale Variable des Master-Skripts zu
-    # und speichern sie für die lokale Verarbeitung im Scriptblock ab.
-    $RemoteData = $using:ReleasedProducts
+    # Die Daten werden hier gleich als hartcodierte Hashtable eingesetzt
+    $RemoteData = @@REMOTEDATA@@
 
-    # Sicherheitsprüfung, falls die Datenübergabe fehlgeschlagen ist
     if (-not $RemoteData -or $RemoteData.Count -eq 0) {
         Write-Host "[-] $($env:computername) Es wurden keine Referenzdaten übergeben. Prüfung abgebrochen." -ForegroundColor Red
         return
@@ -443,8 +453,6 @@ $Scriptblock = {
                 $Name = $regProps.ProductInfoName.Trim()
                 $RawLocalVersion = $regProps.ProductInfoVersion
                 
-                # Wir rufen den Remote-Sollwert direkt ab. 
-                # Ist das Produkt nicht in der Liste, ist der Wert $null.
                 $RemoteVersionRaw = $RemoteData[$Name]
                 
                 if ($null -ne $RemoteVersionRaw) {
@@ -461,7 +469,7 @@ $Scriptblock = {
                             Write-Host "[-] $($env:computername) $($Name): Installiert -> $LocalVerVal | Remote/Soll -> $RemoteVerVal" -ForegroundColor Red
                         }
                     } catch {
-                        Write-Host "[o] $($env:computername) $($Name): - Pilotversion? (Lokal: '$RawLocalVersion' vs Remote: '$RemoteVersionRaw')" -ForegroundColor Yellow
+                        Write-Host "[o] $($env:computername) $($Name) - Pilotversion? (Lokal: '$RawLocalVersion' vs Remote: '$RemoteVersionRaw')" -ForegroundColor Yellow
                     }
                 }
             } catch {
@@ -475,13 +483,16 @@ $Scriptblock = {
     } else {
         Write-Host "[o] $($env:computername): DATEV Registry-Pfad nicht gefunden."
     }
-}
+'@
+
+# Wir tauschen unseren Platzhalter durch den echten Hashtable-String aus
+# und generieren aus dem fertigen Text einen ausfuehrbaren ScriptBlock
+$Scriptblock = [scriptblock]::Create(($ScriptBlockTemplate -replace '@@REMOTEDATA@@', $HashStringDefinition))
 
 ##########################
 # Phase 3: Ausführung auf den Zielsystemen
 ##########################
 
-# Einfacher Aufruf des Wrappers ohne ArgumentList
 Invoke-SWSubnet -scriptblock $Scriptblock
 
   ##########################
