@@ -320,6 +320,16 @@ function AutoPostPatchdayTest()
   }
 
 ##########################
+# Konfiguration: Ausnahmen für den Versionsvergleich
+##########################
+# Produkte in dieser Liste werden beim Vergleich auf allen Zielsystemen übersprungen.
+# Zum Hinzufügen einfach einen weiteren Eintrag ergänzen.
+$ExcludedProducts = @(
+    "DÜ-Formular Lohnsteuer-Anmeldung",
+    "DATEV Digitalisierungs-Cockpit"
+)
+
+##########################
 # Phase 1: Zentraler Datenabruf (Läuft lokal auf deinem Management-System)
 ##########################
 Write-Host "[*] Starte zentralen Datenabruf bei DATEV (letzte 60 Tage)..." -ForegroundColor Cyan
@@ -412,27 +422,26 @@ try {
 }
 
 ##########################
-# Phase 2: Remote ScriptBlock (Wird auf den 2000 Servern ausgeführt)
+# Phase 2: Remote ScriptBlock
 ##########################
 
-# Da der $using: Scope Modul-Grenzen (SWStandardTools) nicht überlebt,
-# konvertieren wir die Hashtable in einen String-Ausdruck (z.B. @{'App1'='1.0'; 'App2'='2.0'})
 $HashStringEntries = @()
 foreach ($key in $ReleasedProducts.Keys) {
-    # Einfache Anführungszeichen escapen, falls Produktnamen welche enthalten
-    $safeKey = $key -replace "'", "''" 
+    $safeKey = $key -replace "'", "''"
     $safeVal = $ReleasedProducts[$key] -replace "'", "''"
     $HashStringEntries += "'$safeKey'='$safeVal'"
 }
 $HashStringDefinition = "@{" + ($HashStringEntries -join '; ') + "}"
 
-# Wir nutzen einen Single-Quote Here-String (@' ... '@), damit PowerShell lokale 
-# Variablen ($env:computername etc.) beim Einlesen nicht direkt auflöst.
+# Ausnahmeliste als PowerShell-Array-Ausdruck serialisieren
+$ExcludeEntries = $ExcludedProducts | ForEach-Object { "'$($_ -replace "'", "''")'" }
+$ExcludeDefinition = "@(" + ($ExcludeEntries -join ', ') + ")"
+
 $ScriptBlockTemplate = @'
     $ErrorActionPreference = "Stop"
 
-    # Die Daten werden hier gleich als hartcodierte Hashtable eingesetzt
-    $RemoteData = @@REMOTEDATA@@
+    $RemoteData     = @@REMOTEDATA@@
+    $ExcludedList   = @@EXCLUDEDLIST@@   # <-- Ausnahmeliste, zentral gepflegt
 
     if (-not $RemoteData -or $RemoteData.Count -eq 0) {
         Write-Host "[-] $($env:computername) Es wurden keine Referenzdaten übergeben. Prüfung abgebrochen." -ForegroundColor Red
@@ -443,25 +452,30 @@ $ScriptBlockTemplate = @'
     if (Test-Path $BasePath) {
         $SoftwareBase = (Get-ChildItem $BasePath).Name
         $errorcount = 0
-        
+
         foreach ($component in $SoftwareBase) {
             try {
                 $productKeyPath = ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions")
                 $product = Get-ChildItem $productKeyPath -ErrorAction Stop
-                
+
                 $regProps = Get-ItemProperty -Path $product.Name.Replace("HKEY_LOCAL_MACHINE", "HKLM:") -ErrorAction Stop
                 $Name = $regProps.ProductInfoName.Trim()
                 $RawLocalVersion = $regProps.ProductInfoVersion
-                
+
+                # Ausnahme: Produkt überspringen wenn in der Ausnahmeliste
+                if (($ExcludedList | Where-Object { $Name -like $_ }) ) {
+                    Write-Host "[~] $($env:computername) $($Name): Von der Prüfung ausgenommen." -ForegroundColor DarkGray
+                    continue
+                }
+
                 $RemoteVersionRaw = $RemoteData[$Name]
-                
+
                 if ($null -ne $RemoteVersionRaw) {
-                    
-                    $CleanLocalVerString = ($RawLocalVersion.ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+                    $CleanLocalVerString  = ($RawLocalVersion.ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
                     $CleanRemoteVerString = ($RemoteVersionRaw.ToString().Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
 
                     try {
-                        $LocalVerVal = [double]::Parse($CleanLocalVerString, [System.Globalization.CultureInfo]::InvariantCulture)
+                        $LocalVerVal  = [double]::Parse($CleanLocalVerString,  [System.Globalization.CultureInfo]::InvariantCulture)
                         $RemoteVerVal = [double]::Parse($CleanRemoteVerString, [System.Globalization.CultureInfo]::InvariantCulture)
 
                         if ($LocalVerVal -lt $RemoteVerVal) {
@@ -476,7 +490,7 @@ $ScriptBlockTemplate = @'
                 # Fehler beim Auslesen einzelner Keys ignorieren
             }
         }
-        
+
         if ($errorcount -eq 0) {
             Write-Host "[+] $($env:computername) DATEV Software geprüft. Alles aktuell." -ForegroundColor Green
         }
@@ -485,14 +499,15 @@ $ScriptBlockTemplate = @'
     }
 '@
 
-# Wir tauschen unseren Platzhalter durch den echten Hashtable-String aus
-# und generieren aus dem fertigen Text einen ausfuehrbaren ScriptBlock
-$Scriptblock = [scriptblock]::Create(($ScriptBlockTemplate -replace '@@REMOTEDATA@@', $HashStringDefinition))
+$ScriptBlockString = $ScriptBlockTemplate `
+    -replace '@@REMOTEDATA@@',    $HashStringDefinition `
+    -replace '@@EXCLUDEDLIST@@',  $ExcludeDefinition
+
+$Scriptblock = [scriptblock]::Create($ScriptBlockString)
 
 ##########################
 # Phase 3: Ausführung auf den Zielsystemen
 ##########################
-
 Invoke-SWSubnet -scriptblock $Scriptblock
 
   ##########################
