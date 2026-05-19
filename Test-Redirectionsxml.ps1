@@ -74,7 +74,7 @@ if ($env:SWFILESRV1 -or ($env:USERDNSDOMAIN -match "sw750")) {
     Write-Host "ASP 3.0 Umgebung erkannt. Nutze Pfad: $FilePath" -ForegroundColor Cyan
 } elseif ($env:USERDNSDOMAIN) {
     # ASP 2.0 Umgebung (über administrativen Share)
-    $FilePath = "\\$env:USERDNSDOMAIN\C$\Windows\SYSVOL\domain\scripts\redirections.xml"
+    $FilePath = "C:\Windows\SYSVOL\domain\scripts\redirections.xml"
     Write-Host "ASP 2.0 Umgebung erkannt. Nutze Pfad: $FilePath" -ForegroundColor Cyan
 } else {
     Write-Host "Fehler: Konnte weder ASP2 noch ASP3 Variablen ermitteln." -ForegroundColor Red
