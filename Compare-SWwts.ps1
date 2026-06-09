@@ -512,7 +512,7 @@ function Compare-SWWts {
         }
     }
     if (-not $EnvDiffFound) { Write-Host "Keine Abweichungen bei System-Umgebungsvariablen gefunden." -ForegroundColor Green }
-
+<#
     # --- AUSWERTUNG: LOKALE GRUPPENRICHTLINIEN (GPO) ---
     Write-Host "`n=== LOKALE GRUPPENRICHTLINIEN (GPO) ===" -ForegroundColor Yellow
     $AllGpos = @()
@@ -565,7 +565,7 @@ function Compare-SWWts {
             Write-Host " -> Dies ist typisch fuer automatisierte Citrix VDA / Optimizer Konfigurationen." -ForegroundColor DarkGray
         }
     }
-
+#>
     Write-Host "`nPruefung abgeschlossen." -ForegroundColor Cyan
 
     # Rueckgabe der gesammelten Objekte, wenn -PassThru verwendet wurde
