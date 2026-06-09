@@ -99,7 +99,7 @@ function Compare-SWWts {
         if (Test-Path $PublicDesktopPath) {
             # Filtert maschinenspezifische Verknuepfungen (z.B. WTS1.lnk, WTS18.lnk, SW639-WTS1.lnk) heraus
             $Shortcuts = Get-ChildItem -Path $PublicDesktopPath | 
-                Where-Object { $_.Name -notmatch '(?i)WTS\d+' } |
+                Where-Object { $_.Name -notmatch '(?i)WTS\d' } |
                 Select-Object Name
         }
 
