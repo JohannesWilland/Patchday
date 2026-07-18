@@ -326,7 +326,8 @@ function AutoPostPatchdayTest()
 # Zum Hinzufügen einfach einen weiteren Eintrag ergänzen.
 $ExcludedProducts = @(
     "DÜ-Formular Lohnsteuer-Anmeldung",
-    "DATEV Digitalisierungs-Cockpit"
+    "DATEV Digitalisierungs-Cockpit",
+    "Diva Basis"
 )
 
 ##########################
