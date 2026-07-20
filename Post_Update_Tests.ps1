@@ -502,7 +502,7 @@ $ScriptBlockTemplate = @'
             ErrorCount      = $errorcount
         }
     } else {
-        Write-Host "[o] $($env:computername): DATEV Registry-Pfad nicht gefunden."[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Write-Host "[o] $($env:computername): DATEV Registry-Pfad nicht gefunden."
         }
 '@
 
