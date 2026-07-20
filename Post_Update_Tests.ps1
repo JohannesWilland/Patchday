@@ -518,10 +518,9 @@ $Scriptblock = [scriptblock]::Create($ScriptBlockString)
 ##########################
 $SubnetResults = Invoke-SWSubnet -scriptblock $Scriptblock
 
-if ($SubnetResults | Where-Object { $_.ErrorCount -eq 0 }) {
+if ($SubnetResults | Where-Object { $_.ErrorCount -gt 0 }) {
     $TestSuccess = $false
     $TestMessage = "Fehler beim zentralen Datenabruf, nicht alle Updates installiert."
-    write-host "[-] Nicht alle Systeme haben die aktuellen DATEV-Versionen installiert. Bitte prüfen!" -ForegroundColor Red
 }
 
   ##########################
