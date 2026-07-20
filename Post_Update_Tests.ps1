@@ -454,6 +454,7 @@ $ScriptBlockTemplate = @'
         $SoftwareBase = (Get-ChildItem $BasePath).Name
         $errorcount = 0
 
+
         foreach ($component in $SoftwareBase) {
             try {
                 $productKeyPath = ([string]$component.Replace("HKEY_LOCAL_MACHINE", "HKLM:") + "\Versions")
@@ -486,6 +487,9 @@ $ScriptBlockTemplate = @'
                     } catch {
                         Write-Host "[o] $($env:computername) $($Name) - Pilotversion? (Lokal: '$RawLocalVersion' vs Remote: '$RemoteVersionRaw')" -ForegroundColor Yellow
                     }
+                } else {
+                    $missingProducts += $Name
+                    Write-Host "[o] $($env:computername) $($Name): Kein Referenzdatensatz in den zentralen Updates gefunden. Wird nicht als Fehler gewertet." -ForegroundColor DarkGray
                 }
             } catch {
                 # Fehler beim Auslesen einzelner Keys ignorieren
@@ -494,6 +498,12 @@ $ScriptBlockTemplate = @'
 
         if ($errorcount -eq 0) {
             Write-Host "[+] $($env:computername) DATEV Software geprüft. Alles aktuell." -ForegroundColor Green
+        }
+
+        [PSCustomObject]@{
+            ComputerName    = $env:COMPUTERNAME
+            ErrorCount      = $errorcount
+            MissingProducts = $missingProducts
         }
     } else {
         Write-Host "[o] $($env:computername): DATEV Registry-Pfad nicht gefunden."
@@ -509,7 +519,12 @@ $Scriptblock = [scriptblock]::Create($ScriptBlockString)
 ##########################
 # Phase 3: Ausführung auf den Zielsystemen
 ##########################
-Invoke-SWSubnet -scriptblock $Scriptblock
+$SubnetResults = Invoke-SWSubnet -scriptblock $Scriptblock
+
+if ($SubnetResults | Where-Object { $_.ErrorCount -gt 0 }) {
+    $TestSuccess = $false
+    $TestMessage = "Fehler beim zentralen Datenabruf, nicht alle Updates installiert."
+}
 
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
