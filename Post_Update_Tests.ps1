@@ -487,9 +487,6 @@ $ScriptBlockTemplate = @'
                     } catch {
                         Write-Host "[o] $($env:computername) $($Name) - Pilotversion? (Lokal: '$RawLocalVersion' vs Remote: '$RemoteVersionRaw')" -ForegroundColor Yellow
                     }
-                } else {
-                    $missingProducts += $Name
-                    Write-Host "[o] $($env:computername) $($Name): Kein Referenzdatensatz in den zentralen Updates gefunden. Wird nicht als Fehler gewertet." -ForegroundColor DarkGray
                 }
             } catch {
                 # Fehler beim Auslesen einzelner Keys ignorieren
@@ -503,10 +500,10 @@ $ScriptBlockTemplate = @'
         [PSCustomObject]@{
             ComputerName    = $env:COMPUTERNAME
             ErrorCount      = $errorcount
-            MissingProducts = $missingProducts
         }
     } else {
-        Write-Host "[o] $($env:computername): DATEV Registry-Pfad nicht gefunden."
+        Write-Host "[o] $($env:computername): DATEV Registry-Pfad nicht gefunden."[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-Expression $(Invoke-WebRequest https://raw.githubusercontent.com/JohannesWilland/Patchday/refs/heads/main/Post_Update_Tests.ps1 -UseBasicParsing).Content
     }
 '@
 
@@ -521,9 +518,10 @@ $Scriptblock = [scriptblock]::Create($ScriptBlockString)
 ##########################
 $SubnetResults = Invoke-SWSubnet -scriptblock $Scriptblock
 
-if ($SubnetResults | Where-Object { $_.ErrorCount -gt 0 }) {
+if ($SubnetResults | Where-Object { $_.ErrorCount -eq }) {
     $TestSuccess = $false
     $TestMessage = "Fehler beim zentralen Datenabruf, nicht alle Updates installiert."
+    Write-Host "[-] Nicht alle Systeme haben die aktuelle DATEV Version installiert. Bitte prüfen!" -ForegroundColor Red
 }
 
   ##########################
