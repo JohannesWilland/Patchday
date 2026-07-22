@@ -11,14 +11,17 @@
 function Compare-SWWts {
     [CmdletBinding()]
     param (
-        [Parameter(Position = 0, HelpMessage="Manuelles Kunden-Praefix, z.B. 'SW639-*'")]
+        [Parameter(Position = 0, HelpMessage = "Manuelles Kunden-Praefix, z.B. 'SW639-*'")]
         [string]$CustomerPrefix,
 
-        [Parameter(HelpMessage="Liste von Servernamen, die von der Pruefung ausgeschlossen werden sollen.")]
+        [Parameter(HelpMessage = "Liste von Servernamen, die von der Pruefung ausgeschlossen werden sollen.")]
         [string[]]$ExcludeServer,
 
-        [Parameter(HelpMessage="Gibt die gefundenen Abweichungen als PowerShell-Objekte zurueck (-PassThru).")]
-        [switch]$PassThru
+        [Parameter(HelpMessage = "Gibt die gefundenen Abweichungen als PowerShell-Objekte zurueck (-PassThru).")]
+        [switch]$PassThru,
+
+        [Parameter(HelpMessage = "Liste von Software-Namen (Teilstrings), die beim Vergleich ignoriert werden sollen.")]
+        [string[]]$ExcludeSoftware = @("Zabbix", "Blubberflupp")
     )
 
     Write-Host "Ermittle Ziel-Server im Netzwerk..." -ForegroundColor Cyan
@@ -27,10 +30,12 @@ function Compare-SWWts {
     if ($CustomerPrefix) {
         $customerPrefixFilter = $CustomerPrefix
         Write-Host " -> Manuelles Kunden-Praefix aktiv: $customerPrefixFilter" -ForegroundColor DarkGray
-    } elseif ($env:COMPUTERNAME -match "^([a-zA-Z]{2}\d+)-") {
+    }
+    elseif ($env:COMPUTERNAME -match "^([a-zA-Z]{2}\d+)-") {
         $customerPrefixFilter = $matches[1] + "-*"
         Write-Host " -> ASP 3 Umgebung erkannt ($($matches[1])). Suche wird optimiert..." -ForegroundColor DarkGray
-    } else {
+    }
+    else {
         Write-Host " -> Klassische ASP 2 Umgebung (oder lokales AD) erkannt. Suche im gesamten AD..." -ForegroundColor DarkGray
     }
 
@@ -67,7 +72,8 @@ function Compare-SWWts {
                 if ($tsSetting.TerminalServerMode -eq "1") {
                     $WTS_List += $server
                 }
-            } catch {}
+            }
+            catch {}
         }
     }
 
@@ -90,8 +96,8 @@ function Compare-SWWts {
         )
         
         $SoftwareList = Get-ItemProperty $UninstallKeys -ErrorAction SilentlyContinue | 
-            Where-Object { $_.DisplayName -and $_.SystemComponent -ne 1 -and $_.ParentKeyName -eq $null } |
-            Select-Object DisplayName, DisplayVersion
+        Where-Object { $_.DisplayName -and $_.SystemComponent -ne 1 -and $_.ParentKeyName -eq $null } |
+        Select-Object DisplayName, DisplayVersion
 
         # 2. Public Desktop Dateien auslesen
         $PublicDesktopPath = "C:\Users\Public\Desktop"
@@ -99,15 +105,15 @@ function Compare-SWWts {
         if (Test-Path $PublicDesktopPath) {
             # Filtert maschinenspezifische Verknuepfungen (z.B. WTS1.lnk, WTS18.lnk, SW639-WTS1.lnk) heraus
             $Shortcuts = Get-ChildItem -Path $PublicDesktopPath | 
-                Where-Object { $_.Name -notmatch '(?i)^WTS\d+(\.lnk)?$' } |
-                Select-Object Name
+            Where-Object { $_.Name -notmatch '(?i)^WTS\d+(\.lnk)?$' } |
+            Select-Object Name
         }
 
         # 3. Windows-Dienste auslesen (Name, Starttyp)
         # User-spezifische Dienste (enden auf _ gefolgt von einem Hex-String wie _98cccc7) werden ignoriert
         $Services = Get-CimInstance -ClassName Win32_Service -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Name -notmatch '_[0-9a-fA-F]{4,8}$' } |
-            Select-Object Name, StartMode
+        Where-Object { $_.Name -notmatch '_[0-9a-fA-F]{4,8}$' } |
+        Select-Object Name, StartMode
 
         # 4. Lokale Gruppenmitgliedschaften (Administratoren & Remotedesktopbenutzer via SIDs)
         $LocalGroups = @()
@@ -126,7 +132,8 @@ function Compare-SWWts {
                     GroupName = $Group.Name
                     Members   = ($NormalizedMembers | Sort-Object) -join "; "
                 }
-            } catch {
+            }
+            catch {
                 # Ignorieren, falls die Gruppe z.B. aufgrund verwaister SIDs einen Fehler wirft
             }
         }
@@ -156,6 +163,20 @@ function Compare-SWWts {
             }
         }
 
+        # 8. Drucker (Name, IP/Port, Treiber, Einstellungen)
+        $Printers = @()
+        $CimPrinters = Get-CimInstance -ClassName Win32_Printer -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '\(von ' }
+        foreach ($P in $CimPrinters) {
+            $Config = Get-PrintConfiguration -PrinterName $P.Name -ErrorAction SilentlyContinue
+            $Printers += [PSCustomObject]@{
+                Name       = $P.Name
+                PortName   = $P.PortName
+                DriverName = $P.DriverName
+                Duplex     = if ($null -ne $Config) { [string]$Config.DuplexingMode } else { "Unbekannt" }
+                Color      = if ($null -ne $Config) { [string]$Config.Color } else { "Unbekannt" }
+            }
+        }
+
         # Rueckgabe als Custom Object
         [PSCustomObject]@{
             Software  = $SoftwareList
@@ -165,6 +186,7 @@ function Compare-SWWts {
             Hotfixes  = $Hotfixes
             EnvVars   = $EnvList
             LocalGPO  = $GpoVersion
+            Printers  = $Printers
         }
     }
 
@@ -184,9 +206,23 @@ function Compare-SWWts {
     $AllSoftware = @()
     foreach ($Node in $RawData) {
         foreach ($App in $Node.Software) {
+            $AppName = $App.DisplayName.Trim()
+            
+            # Pruefen, ob die Software ignoriert werden soll
+            $skip = $false
+            if ($ExcludeSoftware) {
+                foreach ($excl in $ExcludeSoftware) {
+                    if ($AppName -imatch [regex]::Escape($excl)) {
+                        $skip = $true
+                        break
+                    }
+                }
+            }
+            if ($skip) { continue }
+
             $AllSoftware += [PSCustomObject]@{
                 Server  = $Node.PSComputerName
-                AppName = $App.DisplayName.Trim()
+                AppName = $AppName
                 Version = if ($App.DisplayVersion) { $App.DisplayVersion.Trim() } else { "Unbekannt" }
             }
         }
@@ -216,7 +252,8 @@ function Compare-SWWts {
                 if ($ServerApp) {
                     Write-Host "  - $Server : Version $($ServerApp.Version)"
                     $PassThruDetails += "${Server}: $($ServerApp.Version)"
-                } else {
+                }
+                else {
                     Write-Host "  - $Server : NICHT INSTALLIERT" -ForegroundColor DarkGray
                     $PassThruDetails += "${Server}: NICHT INSTALLIERT"
                 }
@@ -268,7 +305,8 @@ function Compare-SWWts {
                 if ($HasShortcut) {
                     Write-Host "  - $Server : Vorhanden"
                     $PassThruDetails += "${Server}: Vorhanden"
-                } else {
+                }
+                else {
                     Write-Host "  - $Server : FEHLT" -ForegroundColor DarkGray
                     $PassThruDetails += "${Server}: FEHLT"
                 }
@@ -341,11 +379,13 @@ function Compare-SWWts {
                     # Farbliche Markierung fuer "Deaktiviert" zur besseren Erkennung
                     if ($ServerSvc.StartMode -eq "Disabled") {
                         Write-Host "  - $Server : Starttyp='$($ServerSvc.StartMode)'" -ForegroundColor Red
-                    } else {
+                    }
+                    else {
                         Write-Host "  - $Server : Starttyp='$($ServerSvc.StartMode)'"
                     }
                     $PassThruDetails += "${Server}: $($ServerSvc.StartMode)"
-                } else {
+                }
+                else {
                     Write-Host "  - $Server : DIENST FEHLT" -ForegroundColor DarkGray
                     $PassThruDetails += "${Server}: FEHLT"
                 }
@@ -393,7 +433,8 @@ function Compare-SWWts {
                 if ($ServerGrp) {
                     Write-Host "  - $Server : Mitglieder = $($ServerGrp.Members)"
                     $PassThruDetails += "${Server}: $($ServerGrp.Members)"
-                } else {
+                }
+                else {
                     Write-Host "  - $Server : Gruppe nicht abgefragt/gefunden" -ForegroundColor DarkGray
                     $PassThruDetails += "${Server}: Nicht gefunden"
                 }
@@ -417,7 +458,8 @@ function Compare-SWWts {
     foreach ($Node in $RawData) {
         if ($Node.Hotfixes) {
             foreach ($Hf in $Node.Hotfixes) {
-                if ($Hf.HotFixID -ne "File 1") { # "File 1" wird manchmal faelschlich von Get-HotFix ausgegeben
+                if ($Hf.HotFixID -ne "File 1") {
+                    # "File 1" wird manchmal faelschlich von Get-HotFix ausgegeben
                     $AllHotfixes += [PSCustomObject]@{
                         Server   = $Node.PSComputerName
                         HotFixID = $Hf.HotFixID
@@ -444,7 +486,8 @@ function Compare-SWWts {
                 if ($HasHf) {
                     Write-Host "  - $Server : Installiert"
                     $PassThruDetails += "${Server}: Installiert"
-                } else {
+                }
+                else {
                     Write-Host "  - $Server : FEHLT" -ForegroundColor DarkGray
                     $PassThruDetails += "${Server}: FEHLT"
                 }
@@ -495,7 +538,8 @@ function Compare-SWWts {
                 if ($ServerEnv) {
                     Write-Host "  - $Server : $($ServerEnv.Value)"
                     $PassThruDetails += "${Server}: $($ServerEnv.Value)"
-                } else {
+                }
+                else {
                     Write-Host "  - $Server : FEHLT" -ForegroundColor DarkGray
                     $PassThruDetails += "${Server}: FEHLT"
                 }
@@ -512,6 +556,68 @@ function Compare-SWWts {
         }
     }
     if (-not $EnvDiffFound) { Write-Host "Keine Abweichungen bei System-Umgebungsvariablen gefunden." -ForegroundColor Green }
+
+    # --- AUSWERTUNG: DRUCKER ---
+    Write-Host "`n=== DRUCKER ABWEICHUNGEN ===" -ForegroundColor Yellow
+    $AllPrinters = @()
+    foreach ($Node in $RawData) {
+        if ($Node.Printers) {
+            foreach ($Printer in $Node.Printers) {
+                $AllPrinters += [PSCustomObject]@{
+                    Server     = $Node.PSComputerName
+                    Name       = $Printer.Name
+                    PortName   = $Printer.PortName
+                    DriverName = $Printer.DriverName
+                    Duplex     = $Printer.Duplex
+                    Color      = $Printer.Color
+                }
+            }
+        }
+    }
+    
+    $GroupedPrinters = $AllPrinters | Group-Object Name
+    $PrinterDiffFound = $false
+
+    foreach ($Group in $GroupedPrinters) {
+        $UniquePorts = $Group.Group | Select-Object PortName -Unique
+        $UniqueDrivers = $Group.Group | Select-Object DriverName -Unique
+        $UniqueDuplex = $Group.Group | Select-Object Duplex -Unique
+        $UniqueColor = $Group.Group | Select-Object Color -Unique
+        
+        $InstalledCount = $Group.Count
+        $ServerCount = $WTS_List.Count
+
+        if ($UniquePorts.Count -gt 1 -or $UniqueDrivers.Count -gt 1 -or $UniqueDuplex.Count -gt 1 -or $UniqueColor.Count -gt 1 -or $InstalledCount -lt $ServerCount) {
+            $PrinterDiffFound = $true
+            Write-Host "`nAbweichung bei Drucker: $($Group.Name)" -ForegroundColor Red
+            
+            $PassThruDetails = @()
+
+            foreach ($Server in $WTS_List) {
+                $ServerPrinter = $Group.Group | Where-Object { $_.Server -eq $Server }
+                if ($ServerPrinter) {
+                    $InfoString = "Port: $($ServerPrinter.PortName), Treiber: $($ServerPrinter.DriverName), Duplex: $($ServerPrinter.Duplex), Farbe: $($ServerPrinter.Color)"
+                    Write-Host "  - $Server : $InfoString"
+                    $PassThruDetails += "${Server}: $InfoString"
+                }
+                else {
+                    Write-Host "  - $Server : FEHLT" -ForegroundColor DarkGray
+                    $PassThruDetails += "${Server}: FEHLT"
+                }
+            }
+
+            if ($PassThru) {
+                $DriftResults += [PSCustomObject]@{
+                    Kategorie = 'Drucker'
+                    Element   = $Group.Name
+                    Problem   = 'Abweichung bei Treiber, Port, Einstellungen oder fehlender Drucker'
+                    Details   = ($PassThruDetails -join ' | ')
+                }
+            }
+        }
+    }
+    if (-not $PrinterDiffFound) { Write-Host "Keine Abweichungen bei Druckern (inkl. Einstellungen) gefunden." -ForegroundColor Green }
+
     <#
     # --- AUSWERTUNG: LOKALE GRUPPENRICHTLINIEN (GPO) ---
     Write-Host "`n=== LOKALE GRUPPENRICHTLINIEN (GPO) ===" -ForegroundColor Yellow
