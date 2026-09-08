@@ -1,36 +1,32 @@
 ####################### Programme Starten ####################################
 # REWE #
-if ((Test-Path "$env:DATEVPP\PROGRAMM\RWAPPLIC\Irw.exe") -and ((test-path HKLM:\SOFTWARE\WOW6432Node\DATEVeG\Components\R0008301) -eq $false))
-{
+if ((Test-Path "$env:DATEVPP\PROGRAMM\RWAPPLIC\Irw.exe") -and ((test-path HKLM:\SOFTWARE\WOW6432Node\DATEVeG\Components\R0008301) -eq $false)) {
   & "$env:DATEVPP\PROGRAMM\RWAPPLIC\Irw.exe"
 }
 # DMS #
-if (Test-Path "$env:DATEVPP\PROGRAMM\K0005100\Dokorg.exe")
-{
+if (Test-Path "$env:DATEVPP\PROGRAMM\K0005100\Dokorg.exe") {
   & "$env:DATEVPP\PROGRAMM\K0005100\Dokorg.exe"
 }
 # Arbeitsplatz
-if (Test-Path "$env:DATEVPP\PROGRAMM\K0005000\Arbeitsplatz.exe")
-{
+if (Test-Path "$env:DATEVPP\PROGRAMM\K0005000\Arbeitsplatz.exe") {
   & "$env:DATEVPP\PROGRAMM\K0005000\Arbeitsplatz.exe"
 }
 
 
-function Send-PatchdayOTState($state)
-{
+function Send-PatchdayOTState($state) {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  if ($env:USERDNSDOMAIN -eq "SW750.local")
-  {$VLAN = ((Get-NetAdapter | Get-DnsClient).ConnectionSpecificSuffix).Split(".")[0]
-  } else
-  {$VLAN = $env:USERDNSDOMAIN.Split(".")[0];
+  if ($env:USERDNSDOMAIN -eq "SW750.local") {
+    $VLAN = ((Get-NetAdapter | Get-DnsClient).ConnectionSpecificSuffix).Split(".")[0]
   }
-  $headers = @{Authorization="Basic d2ViaG9va3M6UnBHNltGZF9QW1pbI1tFRUx6dCNDJA=="}
+  else {
+    $VLAN = $env:USERDNSDOMAIN.Split(".")[0];
+  }
+  $headers = @{Authorization = "Basic d2ViaG9va3M6UnBHNltGZF9QW1pbI1tFRUx6dCNDJA==" }
   $body = "{`"VLAN`": `"$VLAN`", `"Server`": `"$env:computername`", `"State`": `"$state`"}"
-  try
-  {
+  try {
     Invoke-RestMethod 'https://ticket.schuwa.de/OTWSREST/webhooks/PatchdayAutomation' -Method 'POST' -Headers $headers -Body $body 
-  } catch
-  {
+  }
+  catch {
     Write-Host "StatusCode:" $_.Exception.Response.StatusCode.value__
     Write-Host "StatusDescription:" $_.Exception.Response.StatusDescription
   }
@@ -45,8 +41,7 @@ $DATEVSrvName = $DATEVSRV.'(default)'
 
 Send-PatchdayOTState("6 - Post_Update_Tests gestartet")
 
-function AutoPostPatchdayTest()
-{
+function AutoPostPatchdayTest() {
   $TestSuccess = $true
   $TestMessage = ""
 
@@ -56,14 +51,12 @@ function AutoPostPatchdayTest()
   $kommsrv = (resolve-dnsname -name swss-kommserver -type txt -erroraction silentlycontinue).strings
   $kommsession = new-pssession -computername $kommsrv
   $kommSRVInstalled = invoke-command -session $kommsession -scriptblock { $BasePath = "HKLM:\SOFTWARE\WOW6432Node\DATEVeG\Components\B0000004"; Test-Path $BasePath } #B0000004 = DATEV Kommunikationsserver
-  if ($kommSRVInstalled)
-  {
+  if ($kommSRVInstalled) {
   
-    try
-    {
+    try {
       $com = [activator]::CreateInstance([type]::GetTypeFromCLSID("E029EB85-5020-4558-8AD2-B9B85A9FB09C"))
-    } catch
-    {
+    }
+    catch {
       $TestSuccess = $false
       $TestMessage = "[o] DCOM Entpunkt FUNKTEST.Funktionstest2 nicht gefunden. DATEV nicht installiert?"
       Write-Warning $TestMessage
@@ -80,11 +73,10 @@ function AutoPostPatchdayTest()
 
     # Check Exitcode for Errors
     # Exitcode 9573 = Erfolgreich
-    if ($p.ExitCode -eq 9573)
-    {
+    if ($p.ExitCode -eq 9573) {
       Write-Host "[+] RZ-Kommunikation Funktionstest erfolgreich:" $logfile.FullName -ForegroundColor Green
-    } else
-    {
+    }
+    else {
       $TestSuccess = $false
       $TestMessage = "[-] RZ-Kommunikation Funktionstest mit Fehlern beendet"
       Write-Host -ForegroundColor Red $TestMessage+" bitte pruefen:"
@@ -93,8 +85,8 @@ function AutoPostPatchdayTest()
 
     # Cleanup
     Remove-item $logfile
-  } else
-  {
+  }
+  else {
     Write-Host "[o] Kommunikationsserver nicht installiert. RZ-Funktionstest wird uebersprungen. "
   }
 
@@ -120,13 +112,12 @@ function AutoPostPatchdayTest()
   $today = (Get-Date).Date
 
 
-  if ($folder.LastWriteTime -lt $today)
-  {
+  if ($folder.LastWriteTime -lt $today) {
     Write-Host "[-] Datenanpassung ist nicht gelaufen." -ForegroundColor Red
     $TestSuccess = $false
     $TestMessage = "Datenanpassung ist nicht gelaufen."
-  } else
-  {
+  }
+  else {
     $folderPath = Join-Path -Path $TopfolderPath -ChildPath $($folder.Name)
 
 
@@ -145,8 +136,7 @@ function AutoPostPatchdayTest()
       $stateBeforeAdaptation = $xmlFinish.DataAdaptationRun.ConfigurationInfo.StateBeforeAdaptation
 
       # ueberpruefen, ob der Status "Anzupassen" ist
-      if ($stateBeforeAdaptation -eq "Anzupassen")
-      {
+      if ($stateBeforeAdaptation -eq "Anzupassen") {
         # den Pfad zum Datapath-Ordner erstellen
         $datapathFolder = Join-Path -Path $folderPath -ChildPath $datapathId
 
@@ -162,8 +152,7 @@ function AutoPostPatchdayTest()
         # nach einer XML-Datei mit "Archiv" im Namen suchen
         $archiveFile = Get-ChildItem -Path $datapathFolder -Filter *Archiv*.xml | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-        if ($archiveFile)
-        {
+        if ($archiveFile) {
           # die XML-Datei laden
           $xmlArchivContent = Get-Content $archiveFile.FullName
           $xmlArchiv = New-Object -TypeName XML
@@ -171,18 +160,17 @@ function AutoPostPatchdayTest()
           $stateAfterAdaptation = $xmlArchiv.DataAdaptationRun.DatapathInfo.Datacategory
           # die Werte zum Ergebnisarray hinzufuegen
           $results += New-Object PSObject -Property @{
-            'Datapath' = $Datapath
+            'Datapath'              = $Datapath
             'StateBeforeAdaptation' = $stateBeforeAdaptation
-            'StateAfterAdaptation' = $stateAfterAdaptation
-            'ID' = $datapathId
+            'StateAfterAdaptation'  = $stateAfterAdaptation
+            'ID'                    = $datapathId
           }
-        } else
-        {
+        }
+        else {
           # nach einer Datei namens DPFinish_#.xml suchen
           $dpFinishFiles = Get-ChildItem -Path $datapathFolder -Filter DPFinish*.xml
 
-          if ($dpFinishFiles)
-          {
+          if ($dpFinishFiles) {
             # die zuletzt geaenderte Datei nehmen
             $dpFinishFile = $dpFinishFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
@@ -196,19 +184,19 @@ function AutoPostPatchdayTest()
 
             # die Werte zum Ergebnisarray hinzufuegen
             $results += New-Object PSObject -Property @{
-              'Datapath' = $Datapath
+              'Datapath'              = $Datapath
               'StateBeforeAdaptation' = $stateBeforeAdaptation
-              'StateAfterAdaptation' = $stateAfterAdaptation
-              'ID' = $datapathId
+              'StateAfterAdaptation'  = $stateAfterAdaptation
+              'ID'                    = $datapathId
             }
-          } else
-          {
+          }
+          else {
             # die Werte zum Ergebnisarray hinzufuegen
             $results += New-Object PSObject -Property @{
-              'Datapath' = $Datapath
+              'Datapath'              = $Datapath
               'StateBeforeAdaptation' = $stateBeforeAdaptation
-              'StateAfterAdaptation' = 'FEHLER!'
-              'ID' = $datapathId
+              'StateAfterAdaptation'  = 'FEHLER!'
+              'ID'                    = $datapathId
             }
           }
         }
@@ -220,18 +208,15 @@ function AutoPostPatchdayTest()
 
     $DatenanpassungsFehler = $false
 
-    foreach ($result in $results)
-    {
-      if (($result.StateAfterAdaptation -ne "TrafoArchiv") -and  ($result.StateAfterAdaptation -ne "Archiv") -and ($result.StateAfterAdaptation -ne "Angepasst"))
-      {
+    foreach ($result in $results) {
+      if (($result.StateAfterAdaptation -ne "TrafoArchiv") -and ($result.StateAfterAdaptation -ne "Archiv") -and ($result.StateAfterAdaptation -ne "Angepasst")) {
         $DatenanpassungsFehler = $true
         $TestSuccess = $false
         $TestMessage = "Datenbankanpassung mit Fehler"
         Write-Host "[-] DATEV Datenbankanpassung Fehler! Mehr Details: " -ForegroundColor Red -NoNewline; write-host '$DBRESULTS | ogv' -ForegroundColor Cyan
       }
     }
-    if ($DatenanpassungsFehler -eq $false)
-    {
+    if ($DatenanpassungsFehler -eq $false) {
       Write-Host -ForegroundColor Green "[+] Datenanpassung von heute und ohne Fehler. Mehr details: " -NoNewline; write-host '$DBRESULTS | ogv' -ForegroundColor Cyan
     }
   }
@@ -243,19 +228,16 @@ function AutoPostPatchdayTest()
 
   $kommsession = new-pssession -computername $kommsrv
   $zahlungsverkehrrunning = invoke-command -session $kommsession -scriptblock { get-process -name tocontrol -erroraction silentlycontinue } 
-  $zahlungsverkehrinautostart = invoke-command -session $kommsession -scriptblock {Get-ItemProperty HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run -Name WinZV -ErrorAction SilentlyContinue} 
+  $zahlungsverkehrinautostart = invoke-command -session $kommsession -scriptblock { Get-ItemProperty HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run -Name WinZV -ErrorAction SilentlyContinue } 
 
   #pruefen ob der Zahlungsverkehr im Autostart hinterlegt ist
-  if (-not $zahlungsverkehrinautostart)
-  {
+  if (-not $zahlungsverkehrinautostart) {
     Write-Host "[o] Zahlungsverkehr Online-Betrieb ist NICHT im Autostart"
-  } else
-  {
-    if ($zahlungsverkehrrunning)
-    {
+  }
+  else {
+    if ($zahlungsverkehrrunning) {
       #pruefen ob Statusdatei vorhanden ist und auslesen
-      if (Test-Path "L:\DATEV\DATEN\ZVKW\BESTAND\STANDARD\ToCtrl.sem" -ErrorAction SilentlyContinue)
-      {
+      if (Test-Path "L:\DATEV\DATEN\ZVKW\BESTAND\STANDARD\ToCtrl.sem" -ErrorAction SilentlyContinue) {
         $arrZVValues = (Get-Content -Path "L:\DATEV\DATEN\ZVKW\BESTAND\STANDARD\ToCtrl.sem" -ErrorAction SilentlyContinue).Split(",")
 
         $states = @{
@@ -264,20 +246,20 @@ function AutoPostPatchdayTest()
           "7" = "Gestoppt"
           "8" = "Wird gestartet"
         }
-        if ($arrZVValues[0] -eq "2")
-        {
+        if ($arrZVValues[0] -eq "2") {
           Write-host  "[+] Zahlungsverkehr ="$states[$arrZVValues[0]]"seit"$arrZVValues[3] -ForegroundColor Green
-        } else
-        {
+        }
+        else {
           Write-host  "[-] Zahlungsverkehr ="$states[$arrZVValues[0]]"seit"$arrZVValues[3] -ForegroundColor Red
           $TestSuccess = $false
-          $TestMessage = "Zahlungsverkehr = "+$states[$arrZVValues[0]]
+          $TestMessage = "Zahlungsverkehr = " + $states[$arrZVValues[0]]
         }
-      } else
-      {Write-Host -ForegroundColor Red "[-] Zahlungverkehr Status konnte nicht ausgelesen werden"
       }
-    } else
-    {
+      else {
+        Write-Host -ForegroundColor Red "[-] Zahlungverkehr Status konnte nicht ausgelesen werden"
+      }
+    }
+    else {
       Write-Host -ForegroundColor Red "[-] Der Zahlungsverkehr Online-Betrieb ist am $kommsrv nicht gestartet"
       $TestSuccess = $false
       $TestMessage = "Der Zahlungsverkehr nicht gestartet"
@@ -299,63 +281,64 @@ function AutoPostPatchdayTest()
   $p.start() | Out-Null
   $p.WaitForExit() | Out-Null
 
-  if ($p.ExitCode -eq 0)
-  {
+  if ($p.ExitCode -eq 0) {
     Write-Host "[+] Lima funktioniert und ist konsistent." -ForegroundColor Green
-  } elseif ($p.ExitCode -eq 4)
-  {
+  }
+  elseif ($p.ExitCode -eq 4) {
     Write-Host "[-] Lima ist inkonsistent!" -ForegroundColor Red
     $TestSuccess = $false
     $TestMessage = "Lima ist inkonsistent!"
-  } elseif ($p.ExitCode -eq 1)
-  {
+  }
+  elseif ($p.ExitCode -eq 1) {
     Write-Host "[-] Lima ist nicht gestaretet!" -ForegroundColor Red
     $TestSuccess = $false
     $TestMessage = "Lima nicht gestartet!"
-  } else
-  {
+  }
+  else {
     Write-Host "[-] Lima konnte nicht getestet werden" -ForegroundColor Yellow
     $TestSuccess = $false
     $TestMessage = "Lima konnte nicht getestet werden"
   }
 
-##########################
-# Konfiguration: Ausnahmen für den Versionsvergleich
-##########################
-# Produkte in dieser Liste werden beim Vergleich auf allen Zielsystemen übersprungen.
-# Zum Hinzufügen einfach einen weiteren Eintrag ergänzen.
-$ExcludedProducts = @(
+  ##########################
+  # Konfiguration: Ausnahmen für den Versionsvergleich
+  ##########################
+  # Produkte in dieser Liste werden beim Vergleich auf allen Zielsystemen übersprungen.
+  # Zum Hinzufügen einfach einen weiteren Eintrag ergänzen.
+  $ExcludedProducts = @(
     "DÜ-Formular Lohnsteuer-Anmeldung",
     "DATEV Digitalisierungs-Cockpit",
-    "Diva Basis"
-)
+    "Diva Basis",
+    "DATEVconnect",
+    "ISWL Mandantenanalyse Datentransfer"
+  )
 
-##########################
-# Phase 1: Zentraler Datenabruf (Läuft lokal auf deinem Management-System)
-##########################
-Write-Host "[*] Starte zentralen Datenabruf bei DATEV (letzte 60 Tage)..." -ForegroundColor Cyan
+  ##########################
+  # Phase 1: Zentraler Datenabruf (Läuft lokal auf deinem Management-System)
+  ##########################
+  Write-Host "[*] Starte zentralen Datenabruf bei DATEV (letzte 60 Tage)..." -ForegroundColor Cyan
 
-$ErrorActionPreference = "Stop"
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $ErrorActionPreference = "Stop"
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-$SecChUa = '"Chromium";v="121", "Google Chrome";v="121", "Not_A Brand";v="99"'
-$Session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  $UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+  $SecChUa = '"Chromium";v="121", "Google Chrome";v="121", "Not_A Brand";v="99"'
+  $Session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
-$ReleasedProducts = @{}
+  $ReleasedProducts = @{}
 
-try {
+  try {
     # 1. Initiale Cookies
     Invoke-WebRequest -Uri "https://apps.datev.de/myupdates/delivery/all-items" -WebSession $Session -Headers @{
-        "Sec-Fetch-Dest"="document"; "Sec-Fetch-Mode"="navigate"; "Sec-Fetch-Site"="none"; "Upgrade-Insecure-Requests"="1"
-        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "sec-ch-ua-mobile"="?0"; "sec-ch-ua-platform"='"Windows"'
+      "Sec-Fetch-Dest" = "document"; "Sec-Fetch-Mode" = "navigate"; "Sec-Fetch-Site" = "none"; "Upgrade-Insecure-Requests" = "1"
+      "User-Agent" = $UserAgent; "sec-ch-ua" = $SecChUa; "sec-ch-ua-mobile" = "?0"; "sec-ch-ua-platform" = '"Windows"'
     } -ErrorAction Stop -UseBasicParsing | Out-Null
 
     # 2. Session & XSRF-Token
     $StatusUrl = "https://apps.datev.de/myupdates/api/login/status"
     Invoke-WebRequest -Uri $StatusUrl -WebSession $Session -Headers @{
-        "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"; "X-Requested-With"="dcal"
-        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
+      "Sec-Fetch-Dest" = "empty"; "Sec-Fetch-Mode" = "cors"; "Sec-Fetch-Site" = "same-origin"; "X-Requested-With" = "dcal"
+      "User-Agent" = $UserAgent; "sec-ch-ua" = $SecChUa; "Referer" = "https://apps.datev.de/myupdates/delivery/all-items"
     } -ErrorAction Stop -UseBasicParsing | Out-Null
 
     $XsrfToken = ($Session.Cookies.GetCookies($StatusUrl) | Where-Object { $_.Name -eq "XSRF-TOKEN" }).Value
@@ -363,9 +346,9 @@ try {
 
     # 3. Header für API-Abrufe
     $HeadersApi = @{
-        "Accept"="application/json"; "Content-Type"="application/json"; "X-Requested-With"="dcal"; "X-XSRF-TOKEN"=$XsrfToken
-        "User-Agent"=$UserAgent; "sec-ch-ua"=$SecChUa; "Referer"="https://apps.datev.de/myupdates/delivery/all-items"
-        "Sec-Fetch-Dest"="empty"; "Sec-Fetch-Mode"="cors"; "Sec-Fetch-Site"="same-origin"
+      "Accept" = "application/json"; "Content-Type" = "application/json"; "X-Requested-With" = "dcal"; "X-XSRF-TOKEN" = $XsrfToken
+      "User-Agent" = $UserAgent; "sec-ch-ua" = $SecChUa; "Referer" = "https://apps.datev.de/myupdates/delivery/all-items"
+      "Sec-Fetch-Dest" = "empty"; "Sec-Fetch-Mode" = "cors"; "Sec-Fetch-Site" = "same-origin"
     }
 
     # 4. Abruf der 60-Tage-Historie
@@ -376,69 +359,73 @@ try {
     $DateLimit = (Get-Date).AddDays(-60)
 
     $relevantReleases = $deliveries | Where-Object {
-        $deliveryDate = [datetime]$_.delivery_date
-        $isReleaseType = $_.delivery_type -in @("service_release", "main_release")
-        ($deliveryDate -ge $DateLimit) -and ($deliveryDate -lt (Get-Date)) -and $isReleaseType
+      $deliveryDate = [datetime]$_.delivery_date
+      $isReleaseType = $_.delivery_type -in @("service_release", "main_release")
+      ($deliveryDate -ge $DateLimit) -and ($deliveryDate -lt (Get-Date)) -and $isReleaseType
     }
 
     # 5. Aggregation der höchsten Versionen
     foreach ($release in $relevantReleases) {
-        $DetailUrl = "https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/$($release.id)"
-        try {
-            $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop -UseBasicParsing
-            $productsJson = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($res.Content))
-            $productsData = $productsJson | ConvertFrom-Json
+      $DetailUrl = "https://apps.datev.de/myupdates/api/amr/myupdates-be/v1/deliveries/$($release.id)"
+      try {
+        $res = Invoke-WebRequest -Uri $DetailUrl -WebSession $Session -Headers $HeadersApi -Method 'GET' -ErrorAction Stop -UseBasicParsing
+        $productsJson = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding("ISO-8859-1").GetBytes($res.Content))
+        $productsData = $productsJson | ConvertFrom-Json
 
-            $productsData.products | ForEach-Object {
-                try {
-                    $lastSpaceIndex = $_.title.lastIndexOf(' ')
-                    if ($lastSpaceIndex -gt 0) {
-                        $ProductName = $_.title.Substring(0, $lastSpaceIndex).Trim()
-                        $ProductVersionRaw = $_.title.Substring($lastSpaceIndex + 1)
+        $productsData.products | ForEach-Object {
+          try {
+            $lastSpaceIndex = $_.title.lastIndexOf(' ')
+            if ($lastSpaceIndex -gt 0) {
+              $ProductName = $_.title.Substring(0, $lastSpaceIndex).Trim()
+              $ProductVersionRaw = $_.title.Substring($lastSpaceIndex + 1)
                         
-                        $CleanNewVerStr = ($ProductVersionRaw.Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
-                        $NewVerVal = [double]::Parse($CleanNewVerStr, [System.Globalization.CultureInfo]::InvariantCulture)
+              $CleanNewVerStr = ($ProductVersionRaw.Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+              $NewVerVal = [double]::Parse($CleanNewVerStr, [System.Globalization.CultureInfo]::InvariantCulture)
 
-                        if ($ReleasedProducts.ContainsKey($ProductName)) {
-                            $ExistingVerRaw = $ReleasedProducts[$ProductName]
-                            $CleanExistingVerStr = ($ExistingVerRaw.Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
-                            $ExistingVerVal = [double]::Parse($CleanExistingVerStr, [System.Globalization.CultureInfo]::InvariantCulture)
+              if ($ReleasedProducts.ContainsKey($ProductName)) {
+                $ExistingVerRaw = $ReleasedProducts[$ProductName]
+                $CleanExistingVerStr = ($ExistingVerRaw.Replace(',', '.') -replace '[^\d\.]', '').TrimStart('.')
+                $ExistingVerVal = [double]::Parse($CleanExistingVerStr, [System.Globalization.CultureInfo]::InvariantCulture)
 
-                            if ($NewVerVal -gt $ExistingVerVal) {
-                                $ReleasedProducts[$ProductName] = $ProductVersionRaw
-                            }
-                        } else {
-                            $ReleasedProducts[$ProductName] = $ProductVersionRaw
-                        }
-                    }
-                } catch {}
+                if ($NewVerVal -gt $ExistingVerVal) {
+                  $ReleasedProducts[$ProductName] = $ProductVersionRaw
+                }
+              }
+              else {
+                $ReleasedProducts[$ProductName] = $ProductVersionRaw
+              }
             }
-        } catch {}
+          }
+          catch {}
+        }
+      }
+      catch {}
     }
     Write-Host "[+] Datenabruf erfolgreich. $($ReleasedProducts.Count) DATEV-Produkte für den Abgleich aggregiert." -ForegroundColor Green
 
-} catch {
+  }
+  catch {
     Write-Host "[-] Fehler beim zentralen Datenabruf: $($_.Exception.Message)" -ForegroundColor Red
     exit
-}
+  }
 
-##########################
-# Phase 2: Remote ScriptBlock
-##########################
+  ##########################
+  # Phase 2: Remote ScriptBlock
+  ##########################
 
-$HashStringEntries = @()
-foreach ($key in $ReleasedProducts.Keys) {
+  $HashStringEntries = @()
+  foreach ($key in $ReleasedProducts.Keys) {
     $safeKey = $key -replace "'", "''"
     $safeVal = $ReleasedProducts[$key] -replace "'", "''"
     $HashStringEntries += "'$safeKey'='$safeVal'"
-}
-$HashStringDefinition = "@{" + ($HashStringEntries -join '; ') + "}"
+  }
+  $HashStringDefinition = "@{" + ($HashStringEntries -join '; ') + "}"
 
-# Ausnahmeliste als PowerShell-Array-Ausdruck serialisieren
-$ExcludeEntries = $ExcludedProducts | ForEach-Object { "'$($_ -replace "'", "''")'" }
-$ExcludeDefinition = "@(" + ($ExcludeEntries -join ', ') + ")"
+  # Ausnahmeliste als PowerShell-Array-Ausdruck serialisieren
+  $ExcludeEntries = $ExcludedProducts | ForEach-Object { "'$($_ -replace "'", "''")'" }
+  $ExcludeDefinition = "@(" + ($ExcludeEntries -join ', ') + ")"
 
-$ScriptBlockTemplate = @'
+  $ScriptBlockTemplate = @'
     $ErrorActionPreference = "Stop"
 
     $RemoteData     = @@REMOTEDATA@@
@@ -506,36 +493,36 @@ $ScriptBlockTemplate = @'
         }
 '@
 
-$ScriptBlockString = $ScriptBlockTemplate `
-    -replace '@@REMOTEDATA@@',    $HashStringDefinition `
-    -replace '@@EXCLUDEDLIST@@',  $ExcludeDefinition
+  $ScriptBlockString = $ScriptBlockTemplate `
+    -replace '@@REMOTEDATA@@', $HashStringDefinition `
+    -replace '@@EXCLUDEDLIST@@', $ExcludeDefinition
 
-$Scriptblock = [scriptblock]::Create($ScriptBlockString)
+  $Scriptblock = [scriptblock]::Create($ScriptBlockString)
 
-##########################
-# Phase 3: Ausführung auf den Zielsystemen
-##########################
-$SubnetResults = Invoke-SWSubnet -scriptblock $Scriptblock
+  ##########################
+  # Phase 3: Ausführung auf den Zielsystemen
+  ##########################
+  $SubnetResults = Invoke-SWSubnet -scriptblock $Scriptblock
 
-if ($SubnetResults | Where-Object { $_.ErrorCount -gt 0 }) {
+  if ($SubnetResults | Where-Object { $_.ErrorCount -gt 0 }) {
     $TestSuccess = $false
     $TestMessage = "Fehler beim zentralen Datenabruf, nicht alle Updates installiert."
-}
+  }
 
   ##########################
   #Pruefen ob Netzweite Aktualisierung noch aktiv ist
   ##########################
   if (test-path "L:\DATEV\DATEN\INSTMAN\ASD\") {
-    If (Get-Childitem -Path "L:\DATEV\DATEN\INSTMAN\ASD\" -ErrorAction SilentlyContinue -Filter *.dof )
-    {
+    If (Get-Childitem -Path "L:\DATEV\DATEN\INSTMAN\ASD\" -ErrorAction SilentlyContinue -Filter *.dof ) {
       Write-Host "[-] Es ist noch ein Auftrag zur DATEV Netzweiten aktualisierung vorhanden. Bitte abschließen." -ForegroundColor red
       $TestSuccess = $false
       $TestMessage = "DATEV Netzweite Aktualisierung ist noch nicht abgeschlossen."
-    } else
-    {
+    }
+    else {
       write-Host "[+] DATEV Netzweite aktualisierung ist abgeschlossen"  -ForegroundColor green
     }
-  } else {
+  }
+  else {
     write-Host "[-] Prüfung auf Abschluss der DATEV Netzweiten Aktualisierung fehlgeschlagen: Laufwerk L:\ nicht vorhanden."  -ForegroundColor red
   }
 
@@ -549,20 +536,20 @@ if ($SubnetResults | Where-Object { $_.ErrorCount -gt 0 }) {
 
   #if ($DATEVRESULT.count -gt 0)
   #{
-   # write-host "[o] DATEV Installationsergebnis:"
-    #$DATEVResult | Group-Object Rechnername, Ergebnis | Select-Object Name, Count | Format-Table @{L='Server, Status';E={$_.Name}}, @{L='Anwendungen';E={$_.Count}} | Out-String -Stream | ForEach-Object {Write-Output "    $_"}
-    #write-host '    Um weitere Details zur DATEV Installation anzuzeigen, kann der Befehl ' -NoNewline; write-host '$DATEVRESULT | ogv' -ForegroundColor Cyan -NoNewline; Write-host ' verwendet werden'
+  # write-host "[o] DATEV Installationsergebnis:"
+  #$DATEVResult | Group-Object Rechnername, Ergebnis | Select-Object Name, Count | Format-Table @{L='Server, Status';E={$_.Name}}, @{L='Anwendungen';E={$_.Count}} | Out-String -Stream | ForEach-Object {Write-Output "    $_"}
+  #write-host '    Um weitere Details zur DATEV Installation anzuzeigen, kann der Befehl ' -NoNewline; write-host '$DATEVRESULT | ogv' -ForegroundColor Cyan -NoNewline; Write-host ' verwendet werden'
     
-    #} else {
-    #  Write-Host "[-] Es konnten keine DATEV Installationsinformationen gefunden werden. Bitte Installationslogbuch pruefen!" -ForegroundColor red
+  #} else {
+  #  Write-Host "[-] Es konnten keine DATEV Installationsinformationen gefunden werden. Bitte Installationslogbuch pruefen!" -ForegroundColor red
   #}
 
   ##########################
   # Update Agent Service pruefen (Stop-SWUpdate ausgefuehrt? Abgeschlossen?)
   ##########################
-  invoke-swsubnet -scriptblock {if (Get-Service -Name SchuwaUpdateAgent -ErrorAction SilentlyContinue)
-    {Write-Host -ForegroundColor yellow "[o] $ENV:COMPUTERNAME Patchday Update Agent laeuft noch. Automatisierung wurde noch nicht abgeschlossen."
-    }}
+  invoke-swsubnet -scriptblock { if (Get-Service -Name SchuwaUpdateAgent -ErrorAction SilentlyContinue) {
+      Write-Host -ForegroundColor yellow "[o] $ENV:COMPUTERNAME Patchday Update Agent laeuft noch. Automatisierung wurde noch nicht abgeschlossen."
+    } }
 
   ##########################
   #Citrix Wartungsmodus pruefen 
@@ -571,75 +558,72 @@ if ($SubnetResults | Where-Object { $_.ErrorCount -gt 0 }) {
   $ErrorActionPreference = 'Stop'
 
   try {
-      # --- 1) Controller über SRV-Record finden ---
-      $dnsName = "swctxdc._tcp.$($env:USERDNSDOMAIN)"
-      $srv = Resolve-DnsName -Type SRV -Name $dnsName |
-            Sort-Object -Property Priority,Weight |
-            Select-Object -First 1
+    # --- 1) Controller über SRV-Record finden ---
+    $dnsName = "swctxdc._tcp.$($env:USERDNSDOMAIN)"
+    $srv = Resolve-DnsName -Type SRV -Name $dnsName |
+    Sort-Object -Property Priority, Weight |
+    Select-Object -First 1
 
-      if (-not $srv) { throw "Kein SRV-Record für $dnsName gefunden." }
+    if (-not $srv) { throw "Kein SRV-Record für $dnsName gefunden." }
 
-      $ctxComputerName = $srv.NameTarget.TrimEnd('.')
-
-
-      # --- 2) SessionTimeOuts (lokal, NICHT remote!) ---
-      $so = New-PSSessionOption -OperationTimeout 180000 -IdleTimeout 600000
+    $ctxComputerName = $srv.NameTarget.TrimEnd('.')
 
 
-      # --- 3) RemoteSession öffnen ---
-      $ctxSession = New-PSSession -ComputerName $ctxComputerName `
-                                  -ConfigurationName CitrixConfig `
-                                  -SessionOption $so
+    # --- 2) SessionTimeOuts (lokal, NICHT remote!) ---
+    $so = New-PSSessionOption -OperationTimeout 180000 -IdleTimeout 600000
 
 
-      # --- 4) ABSOLUT minimaler Citrix Remote Call ---
-      #     Keine Syntax, keine Arrays, keine Variablen: nur 1 Cmdlet
-      $ctxBroker = Invoke-Command -Session $ctxSession -ScriptBlock {
-          Get-BrokerMachine
+    # --- 3) RemoteSession öffnen ---
+    $ctxSession = New-PSSession -ComputerName $ctxComputerName `
+      -ConfigurationName CitrixConfig `
+      -SessionOption $so
+
+
+    # --- 4) ABSOLUT minimaler Citrix Remote Call ---
+    #     Keine Syntax, keine Arrays, keine Variablen: nur 1 Cmdlet
+    $ctxBroker = Invoke-Command -Session $ctxSession -ScriptBlock {
+      Get-BrokerMachine
+    }
+
+
+    # --- 5) Lokale Auswertung ---
+    foreach ($m in $ctxBroker) {
+      if ($m.InMaintenanceMode) {
+        Write-Host -ForegroundColor Red "[-] $($m.MachineName) Wartungsmodus aktiv!"
+        $TestSuccess = $false
+        $TestMessage = "Mindestens ein System im Wartungsmodus."
       }
-
-
-      # --- 5) Lokale Auswertung ---
-      foreach ($m in $ctxBroker) {
-          if ($m.InMaintenanceMode) {
-              Write-Host -ForegroundColor Red "[-] $($m.MachineName) Wartungsmodus aktiv!"
-              $TestSuccess = $false
-              $TestMessage = "Mindestens ein System im Wartungsmodus."
-          }
-          else {
-              Write-Host -ForegroundColor Green "[+] $($m.MachineName) Wartungsmodus aus."
-          }
+      else {
+        Write-Host -ForegroundColor Green "[+] $($m.MachineName) Wartungsmodus aus."
       }
+    }
   }
   catch {
-      Write-Warning "Fehler: $($_.Exception.Message)"
+    Write-Warning "Fehler: $($_.Exception.Message)"
   }
   finally {
-      # --- 6) Session bereinigen ---
-      if ($ctxSession) {
-          try { Remove-PSSession -Session $ctxSession }
-          catch { Write-Warning "Session konnte nicht entfernt werden: $($_.Exception.Message)" }
-      }
+    # --- 6) Session bereinigen ---
+    if ($ctxSession) {
+      try { Remove-PSSession -Session $ctxSession }
+      catch { Write-Warning "Session konnte nicht entfernt werden: $($_.Exception.Message)" }
+    }
   }
 
   ##########################
   #Ergebnis an OT uebermitteln
   ##########################
-  if ($TestSuccess -eq $true)
-  {
+  if ($TestSuccess -eq $true) {
     Send-PatchdayOTState("8 - Tests abgeschlossen: erfolgreich")
-  } else
-  {
-    Send-PatchdayOTState("7 - Tests abgeschlossen: FEHLER: "+$TestMessage)
+  }
+  else {
+    Send-PatchdayOTState("7 - Tests abgeschlossen: FEHLER: " + $TestMessage)
   }
 }
 
-While ($True)
-{
+While ($True) {
   AutoPostPatchdayTest
   $confirmation = Read-Host "Soll der automatische Test wiederholt werden? (y/n)"
-  if ($confirmation -eq "n")
-  {
+  if ($confirmation -eq "n") {
     break
   }
 }
